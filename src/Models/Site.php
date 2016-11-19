@@ -403,11 +403,3 @@ class Site extends TerminusModel implements ConfigAwareInterface, ContainerAware
         return $this->solr;
     }
 }
-r()
-    {
-        if (empty($this->solr)) {
-            $this->solr = $this->getContainer()->get(Solr::class, [null, ['site' => $this,]]);
-        }
-        return $this->solr;
-    }
-}

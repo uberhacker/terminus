@@ -8,7 +8,6 @@ use Robo\Common\ConfigAwareTrait;
 use Robo\Contract\ConfigAwareInterface;
 use Pantheon\Terminus\Collections\Branches;
 use Terminus\Collections\Environments;
-use Terminus\Collections\SiteAuthorizations;
 use Terminus\Collections\SiteOrganizationMemberships;
 use Pantheon\Terminus\Collections\SiteUserMemberships;
 use Pantheon\Terminus\Collections\Workflows;
@@ -23,10 +22,6 @@ class Site extends TerminusModel implements ConfigAwareInterface, ContainerAware
     use ConfigAwareTrait;
     use ContainerAwareTrait;
 
-    /**
-     * @var SiteAuthorizations
-     */
-    public $authorizations;
     /**
      * @var Branches
      */
@@ -81,7 +76,6 @@ class Site extends TerminusModel implements ConfigAwareInterface, ContainerAware
         $this->url = "sites/{$this->id}?site_state=true";
 
         $params = ['site' => $this,];
-        $this->authorizations = new SiteAuthorizations($params);
         $this->environments = new Environments($params);
         $this->new_relic = new NewRelic(null, $params);
         $this->setUpstream($attributes);
@@ -402,6 +396,14 @@ class Site extends TerminusModel implements ConfigAwareInterface, ContainerAware
      * @return Solr
      */
     public function getSolr()
+    {
+        if (empty($this->solr)) {
+            $this->solr = $this->getContainer()->get(Solr::class, [null, ['site' => $this,]]);
+        }
+        return $this->solr;
+    }
+}
+r()
     {
         if (empty($this->solr)) {
             $this->solr = $this->getContainer()->get(Solr::class, [null, ['site' => $this,]]);

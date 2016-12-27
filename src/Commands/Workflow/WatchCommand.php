@@ -86,8 +86,8 @@ class WatchCommand extends TerminusCommand implements SiteAwareInterface
                     $this->log()->notice($finished_message, $finished_context);
 
                     if ($workflow->get('has_operation_log_output')) {
-                            $workflow->fetchWithLogs();
-                            $operations = $workflow->operations();
+                        $workflow->fetchWithLogs();
+                        $operations = $workflow->operations();
                         foreach ($operations as $operation) {
                             if ($operation->has('log_output')) {
                                 $log_msg = sprintf(
@@ -102,6 +102,7 @@ class WatchCommand extends TerminusCommand implements SiteAwareInterface
                     }
                 }
             }
+            break;
         }
     }
 }

@@ -187,7 +187,7 @@ class WatchCommandTest extends WorkflowCommandTest
                 $this->equalTo("\n------ $description ({$this->environment->id}) ------\n$log_output")
             );
 */
-        $out = $this->command->watch($site_name);
+        $out = $this->command->watch($site_name, ['checks' => 1,]);
         $this->assertNull($out);
     }
 }

@@ -24,14 +24,16 @@ class WatchCommand extends TerminusCommand implements SiteAwareInterface
      * @command workflow:watch
      *
      * @param string $site_id Site name
+     * @option integer $checks Times to query
      *
      * @usage terminus workflow:watch <site>
      *     Streams new and finished workflows from <site> to the console.
      */
-    public function watch($site_id)
+    public function watch($site_id, $options = ['checks' => null,])
     {
         $site = $this->getSite($site_id);
         $date_format = $this->getConfig()->get('date_format');
+        $checks = $options['checks'];
 
         // Keep track of workflows that have been printed.
         // This is necessary because the local clock may drift from
@@ -102,7 +104,9 @@ class WatchCommand extends TerminusCommand implements SiteAwareInterface
                     }
                 }
             }
-            break;
+            if (is_integer($checks) && (--$checks < 1)) {
+                break;
+            }
         }
     }
 }

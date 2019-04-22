@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\Commands\Org\People;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 
 /**
  * Class AddCommand
@@ -10,6 +11,8 @@ use Pantheon\Terminus\Commands\TerminusCommand;
  */
 class AddCommand extends TerminusCommand
 {
+    use WorkflowProcessingTrait;
+
     /**
      * Adds a user to an organization.
      *
@@ -18,7 +21,7 @@ class AddCommand extends TerminusCommand
      * @command org:people:add
      * @aliases org:ppl:add
      *
-     * @param string $organization Organization name or ID
+     * @param string $organization Organization name, label, or ID
      * @param string $email Email address
      * @param string $role [admin|unprivileged|team_member|developer] Role
      *
@@ -26,14 +29,11 @@ class AddCommand extends TerminusCommand
      */
     public function add($organization, $email, $role)
     {
-        $org = $this->session()->getUser()->getOrgMemberships()->get($organization)->getOrganization();
-        $workflow = $org->getUserMemberships()->create($email, $role);
-        while (!$workflow->checkProgress()) {
-            // @TODO: Add Symfony progress bar to indicate that something is happening.
-        }
+        $org = $this->session()->getUser()->getOrganizationMemberships()->get($organization)->getOrganization();
+        $this->processWorkflow($org->getUserMemberships()->create($email, $role));
         $this->log()->notice(
             '{email} has been added to the {org} organization as a(n) {role}.',
-            ['email' => $email, 'org' => $org->get('profile')->name, 'role' => $role,]
+            ['email' => $email, 'org' => $org->getName(), 'role' => $role,]
         );
     }
 }

@@ -5,14 +5,16 @@ namespace Pantheon\Terminus\UnitTests\Commands\Site;
 use Pantheon\Terminus\Collections\Upstreams;
 use Pantheon\Terminus\Collections\UserOrganizationMemberships;
 use Pantheon\Terminus\Commands\Site\CreateCommand;
+use Pantheon\Terminus\Config\TerminusConfig;
 use Pantheon\Terminus\Exceptions\TerminusException;
 use Pantheon\Terminus\Models\Organization;
 use Pantheon\Terminus\Models\Upstream;
+use Pantheon\Terminus\Models\User;
 use Pantheon\Terminus\Models\UserOrganizationMembership;
 use Pantheon\Terminus\Models\Workflow;
-use Pantheon\Terminus\Models\User;
 use Pantheon\Terminus\Session\Session;
 use Pantheon\Terminus\UnitTests\Commands\CommandTestCase;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class CreateCommandTest
@@ -21,6 +23,7 @@ use Pantheon\Terminus\UnitTests\Commands\CommandTestCase;
  */
 class CreateCommandTest extends CommandTestCase
 {
+    use WorkflowProgressTrait;
     /**
      * @var Organization
      */
@@ -71,10 +74,12 @@ class CreateCommandTest extends CommandTestCase
             ->getMock();
         $this->upstream->id = 'upstream_id';
 
-        $this->command = new CreateCommand($this->getConfig());
+        $this->command = new CreateCommand();
         $this->command->setSites($this->sites);
         $this->command->setLogger($this->logger);
         $this->command->setSession($this->session);
+        $this->command->setConfig($this->getConfig());
+        $this->command->setContainer($this->getContainer());
     }
 
     /**
@@ -99,12 +104,8 @@ class CreateCommandTest extends CommandTestCase
         $this->expectUpstreams();
         $this->sites->expects($this->once())
             ->method('create')
-            ->with($this->equalTo(['site_name' => $site_name, 'label' => $label,]))
+            ->with($this->equalTo(['site_name' => $site_name, 'label' => $label, 'preferred_zone' => 'eu']))
             ->willReturn($workflow);
-        $workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
         $this->logger->expects($this->at(0))
             ->method('log')
             ->with(
@@ -112,6 +113,7 @@ class CreateCommandTest extends CommandTestCase
                 $this->equalTo('Creating a new site...')
             );
 
+        $this->expectWorkflowProcessing();
         $workflow->expects($this->once())
             ->method('get')
             ->with($this->equalTo('waiting_for_task'))
@@ -126,10 +128,6 @@ class CreateCommandTest extends CommandTestCase
             ->method('deployProduct')
             ->with($this->equalTo($this->upstream->id))
             ->willReturn($workflow2);
-        $workflow2->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
         $this->logger->expects($this->at(2))
             ->method('log')
             ->with(
@@ -137,7 +135,7 @@ class CreateCommandTest extends CommandTestCase
                 $this->equalTo('Deployed CMS')
             );
 
-        $out = $this->command->create($site_name, $label, 'upstream');
+        $out = $this->command->create($site_name, $label, 'upstream', ['org' => null, 'region' => 'eu']);
         $this->assertNull($out);
     }
 
@@ -153,6 +151,7 @@ class CreateCommandTest extends CommandTestCase
             ->with($this->equalTo($site_name))
             ->willReturn(true);
 
+        $this->expectWorkflowProcessing();
         $this->setExpectedException(TerminusException::class, "The site name $site_name is already taken.");
 
         $out = $this->command->create($site_name, $site_name, 'upstream');
@@ -191,7 +190,7 @@ class CreateCommandTest extends CommandTestCase
 
         $this->expectUpstreams();
         $this->user->expects($this->once())
-            ->method('getOrgMemberships')
+            ->method('getOrganizationMemberships')
             ->with()
             ->willReturn($user_org_memberships);
         $user_org_memberships->expects($this->once())
@@ -211,16 +210,19 @@ class CreateCommandTest extends CommandTestCase
                 'organization_id' => $organization->id,
             ]))
             ->willReturn($workflow);
-        $workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
         $this->logger->expects($this->at(0))
             ->method('log')
             ->with(
                 $this->equalTo('notice'),
                 $this->equalTo('Creating a new site...')
             );
+
+        $this->config->expects($this->at(0))
+            ->method('get')
+            ->with('command_site_options_region')
+            ->willReturn(null);
+        $this->expectContainerRetrieval();
+        $this->expectProgressBarCycling();
 
         $workflow->expects($this->once())
             ->method('get')
@@ -236,10 +238,6 @@ class CreateCommandTest extends CommandTestCase
             ->method('deployProduct')
             ->with($this->equalTo($this->upstream->id))
             ->willReturn($workflow2);
-        $workflow2->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
         $this->logger->expects($this->at(2))
             ->method('log')
             ->with(

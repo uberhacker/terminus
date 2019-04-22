@@ -10,6 +10,7 @@ use Pantheon\Terminus\Models\Environment;
  */
 class Environments extends SiteOwnedCollection
 {
+    const PRETTY_NAME = 'environments';
     /**
      * @var string
      */
@@ -48,13 +49,26 @@ class Environments extends SiteOwnedCollection
     }
 
     /**
+     * Filters out non-multidev environments
+     *
+     * @return Environments $this
+     */
+    public function filterForMultidev()
+    {
+        $this->filter(function ($env) {
+            return $env->isMultidev();
+        });
+        return $this;
+    }
+
+    /**
      * List Environment IDs, with Dev/Test/Live first
      *
      * @return string[] $ids
      */
     public function ids()
     {
-        $ids = array_keys($this->getMembers());
+        $ids = array_keys($this->all());
 
         //Reorder environments to put dev/test/live first
         $default_ids = ['dev', 'test', 'live'];
@@ -71,13 +85,9 @@ class Environments extends SiteOwnedCollection
      */
     public function multidev()
     {
-        $environments = array_filter(
-            $this->getMembers(),
-            function ($environment) {
-                return $environment->isMultidev();
-            }
-        );
-        return $environments;
+        $multidev_envs = $this->filterForMultidev()->all();
+        $this->reset();
+        return $multidev_envs;
     }
 
     /**
@@ -87,9 +97,9 @@ class Environments extends SiteOwnedCollection
      */
     public function serialize()
     {
-        $site_is_frozen = !is_null($this->site->get('frozen'));
+        $site_is_frozen = $this->getSite()->isFrozen();
         $models = [];
-        foreach ($this->getMembers() as $id => $model) {
+        foreach ($this->all() as $id => $model) {
             if (!$site_is_frozen || !in_array($id, ['test', 'live',])) {
                 $models[$id] = $model->serialize();
             }

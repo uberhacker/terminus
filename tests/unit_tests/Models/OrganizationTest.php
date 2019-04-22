@@ -4,13 +4,11 @@ namespace Pantheon\Terminus\UnitTests\Models;
 
 use League\Container\Container;
 use Pantheon\Terminus\Collections\OrganizationSiteMemberships;
+use Pantheon\Terminus\Collections\OrganizationUpstreams;
 use Pantheon\Terminus\Collections\OrganizationUserMemberships;
 use Pantheon\Terminus\Collections\Workflows;
 use Pantheon\Terminus\Models\Organization;
-use Pantheon\Terminus\Models\OrganizationSiteMembership;
-use Pantheon\Terminus\Models\OrganizationUserMembership;
-use Pantheon\Terminus\Models\User;
-use Pantheon\Terminus\Models\Site;
+use Pantheon\Terminus\Models\Profile;
 
 /**
  * Class OrganizationTest
@@ -23,6 +21,14 @@ class OrganizationTest extends ModelTestCase
      * @var Container
      */
     protected $container;
+    /**
+     * @var Organization
+     */
+    protected $model;
+    /**
+     * @var Profile
+     */
+    protected $profile;
 
     /**
      * @inheritdoc
@@ -34,6 +40,12 @@ class OrganizationTest extends ModelTestCase
         $this->container = $this->getMockBuilder(Container::class)
             ->disableOriginalConstructor()
             ->getMock();
+        $this->profile = $this->getMockBuilder(Profile::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $this->model = new Organization();
+        $this->model->setContainer($this->container);
     }
 
     /**
@@ -41,6 +53,7 @@ class OrganizationTest extends ModelTestCase
      */
     public function testGetFeature()
     {
+        $org_id = 'org id';
         $data = [
             'change_management' => true,
             'multidev' => false,
@@ -49,17 +62,35 @@ class OrganizationTest extends ModelTestCase
         $this->request->expects($this->once())
             ->method('request')
             ->with(
-                'organizations/123/features',
+                "organizations/$org_id/features",
                 []
             )
             ->willReturn(['data' => $data,]);
 
-        $organization = new Organization((object)['id' => '123',]);
-        $organization->setRequest($this->request);
+        $this->model->id = $org_id;
+        $this->model->setRequest($this->request);
 
-        $this->assertTrue($organization->getFeature('change_management'));
-        $this->assertFalse($organization->getFeature('multidev'));
-        $this->assertNull($organization->getFeature('invalid'));
+        $this->assertTrue($this->model->getFeature('change_management'));
+        $this->assertFalse($this->model->getFeature('multidev'));
+        $this->assertNull($this->model->getFeature('invalid'));
+    }
+
+    /**
+     * Tests the Organization::getLabel() function
+     */
+    public function testGetLabel()
+    {
+        $org_label = 'Organization Label';
+        $this->container->expects($this->once())
+            ->method('get')
+            ->with(Profile::class)
+            ->willReturn($this->profile);
+        $this->profile->expects($this->once())
+            ->method('get')
+            ->with($this->equalTo('name'))
+            ->willReturn($org_label);
+
+        $this->assertEquals($org_label, $this->model->getLabel());
     }
 
     /**
@@ -67,71 +98,51 @@ class OrganizationTest extends ModelTestCase
      */
     public function testGetName()
     {
-        $org_name = 'organization name';
-        $organization = new Organization((object)['id' => '123', 'profile' => (object)['name' => $org_name,],]);
-        $out = $organization->getName();
-        $this->assertEquals($org_name, $out);
+        $org_name = 'org-name';
+        $this->container->expects($this->once())
+            ->method('get')
+            ->with(Profile::class)
+            ->willReturn($this->profile);
+        $this->profile->expects($this->once())
+            ->method('get')
+            ->with($this->equalTo('machine_name'))
+            ->willReturn($org_name);
+
+        $this->assertEquals($org_name, $this->model->getName());
     }
 
+
     /**
-     * Tests the Organization::getSites() function
+     * Tests the Organization::serialize() and Organization::getReferences() functions
      */
-    public function testGetSites()
+    public function testGetReferences()
     {
-        $organization = new Organization((object)['id' => '123',]);
-
-        $model_data = [
-            'a' => (object)[
-                'site' => new Site((object)['id' => 'abc', 'name' => 'Site A',]),
-                'organization_id' => '123',
-                'role' => 'team_member',
-            ],
-            'b' => (object)[
-                'site' => new Site((object)['id' => 'bcd', 'name' => 'Site B',]),
-                'organization_id' => '123',
-                'role' => 'team_member',
-            ],
-            'c' => (object)[
-                'site' => new Site((object)['id' => 'cde', 'name' => 'Site C',]),
-                'organization_id' => '123',
-                'role' => 'team_member',
-            ],
-        ];
-        $models = $sites = [];
-        foreach ($model_data as $id => $data) {
-            $models[$id] = $this->getMockBuilder(OrganizationSiteMembership::class)
-                ->disableOriginalConstructor()
-                ->getMock();
-            $models[$id]->method('getSite')->willReturn($data->site);
-            $sites[$data->site->id] = $data->site;
-        }
-        $org_site_membership = $this->getMockBuilder(OrganizationSiteMemberships::class)
-            ->setMethods(['getMembers'])
-            ->disableOriginalConstructor()
-            ->getMock();
-
-        $org_site_membership->expects($this->any())
-            ->method('getMembers')
-            ->willReturn($models);
+        $name = 'organization-name';
+        $label = 'Organization Label';
+        $this->model->id = 'org id';
+        $expected = ['id' => $this->model->id, 'name' => $name, 'label' => $label,];
 
         $this->container->expects($this->once())
             ->method('get')
-            ->with(OrganizationSiteMemberships::class, [['organization' => $organization,],])
-            ->willReturn($org_site_membership);
+            ->with(Profile::class)
+            ->willReturn($this->profile);
+        $this->profile->expects($this->at(0))
+            ->method('get')
+            ->with($this->equalTo('machine_name'))
+            ->willReturn($name);
+        $this->profile->expects($this->at(1))
+            ->method('get')
+            ->with($this->equalTo('name'))
+            ->willReturn($label);
 
-        $organization->setContainer($this->container);
-
-        $this->assertEquals($org_site_membership, $organization->getSiteMemberships());
-        $this->assertEquals($sites, $organization->getSites());
+        $this->assertEquals($expected, $this->model->getReferences());
     }
 
     /**
      * Tests the Organization::getSiteMemberships() function
      */
-    public function testSiteMemberships()
+    public function testGetSiteMemberships()
     {
-        $org_name = 'organization name';
-        $organization = new Organization((object)['id' => '123', 'profile' => (object)['name' => $org_name,],]);
         $org_site_memberships = $this->getMockBuilder(OrganizationSiteMemberships::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -139,22 +150,37 @@ class OrganizationTest extends ModelTestCase
             ->method('get')
             ->with(
                 $this->equalTo(OrganizationSiteMemberships::class),
-                $this->equalTo([['organization' => $organization,],])
+                $this->equalTo([['organization' => $this->model,],])
             )
             ->willReturn($org_site_memberships);
-        $organization->setContainer($this->container);
 
-        $out = $organization->getSiteMemberships();
-        $this->assertEquals($org_site_memberships, $out);
+        $this->assertEquals($org_site_memberships, $this->model->getSiteMemberships());
+    }
+
+    /**
+     * Tests the Organization::getUpstreams() function
+     */
+    public function testGetUpstreams()
+    {
+        $upstreams = $this->getMockBuilder(OrganizationUpstreams::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $this->container->expects($this->once())
+            ->method('get')
+            ->with(
+                $this->equalTo(OrganizationUpstreams::class),
+                $this->equalTo([['organization' => $this->model,],])
+            )
+            ->willReturn($upstreams);
+
+        $this->assertEquals($upstreams, $this->model->getUpstreams());
     }
 
     /**
      * Tests the Organization::getUserMemberships() function
      */
-    public function testUserMemberships()
+    public function testGetUserMemberships()
     {
-        $org_name = 'organization name';
-        $organization = new Organization((object)['id' => '123', 'profile' => (object)['name' => $org_name,],]);
         $org_user_memberships = $this->getMockBuilder(OrganizationUserMemberships::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -162,54 +188,11 @@ class OrganizationTest extends ModelTestCase
             ->method('get')
             ->with(
                 $this->equalTo(OrganizationUserMemberships::class),
-                $this->equalTo([['organization' => $organization,],])
+                $this->equalTo([['organization' => $this->model,],])
             )
             ->willReturn($org_user_memberships);
-        $organization->setContainer($this->container);
 
-        $out = $organization->getUserMemberships();
-        $this->assertEquals($org_user_memberships, $out);
-    }
-
-    /**
-     * Tests the Organization::getUsers() function
-     */
-    public function testGetUsers()
-    {
-        $organization = new Organization((object)['id' => '123',]);
-
-        $user_data = [
-            'a' => ['id' => 'abc', 'email' => 'a@example.com', 'profile' => (object)['full_name' => 'User A',],],
-            'b' => ['id' => 'bcd', 'email' => 'b@example.com', 'profile' => (object)['full_name' => 'User B',],],
-            'c' => ['id' => 'cde', 'email' => 'c@example.com', 'profile' => (object)['full_name' => 'User C',],],
-        ];
-        $model_data = $users = [];
-        foreach ($user_data as $i => $user) {
-            $model_data[$i] = $this->getMockBuilder(OrganizationUserMembership::class)
-                ->disableOriginalConstructor()
-                ->getMock();
-            $users[$user['id']] = new User((object)$user);
-            $model_data[$i]->method('getUser')->willReturn($users[$user['id']]);
-        }
-
-        $org_user_membership = $this->getMockBuilder(OrganizationUserMemberships::class)
-            ->setMethods(['getMembers',])
-            ->disableOriginalConstructor()
-            ->getMock();
-        $org_user_membership->expects($this->any())
-            ->method('getMembers')
-            ->willReturn($model_data);
-        $this->container = $this->getMockBuilder(Container::class)
-            ->disableOriginalConstructor()
-            ->getMock();
-        $this->container->expects($this->once())
-            ->method('get')
-            ->with(OrganizationUserMemberships::class, [['organization' => $organization,],])
-            ->willReturn($org_user_membership);
-        $organization->setContainer($this->container);
-
-        $this->assertEquals($org_user_membership, $organization->getUserMemberships());
-        $this->assertEquals($users, $organization->getUsers());
+        $this->assertEquals($org_user_memberships, $this->model->getUserMemberships());
     }
 
     /**
@@ -217,8 +200,6 @@ class OrganizationTest extends ModelTestCase
      */
     public function testGetWorkflows()
     {
-        $org_name = 'organization name';
-        $organization = new Organization((object)['id' => '123', 'profile' => (object)['name' => $org_name,],]);
         $workflows = $this->getMockBuilder(Workflows::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -226,13 +207,11 @@ class OrganizationTest extends ModelTestCase
             ->method('get')
             ->with(
                 $this->equalTo(Workflows::class),
-                $this->equalTo([['organization' => $organization,],])
+                $this->equalTo([['organization' => $this->model,],])
             )
             ->willReturn($workflows);
-        $organization->setContainer($this->container);
 
-        $out = $organization->getWorkflows();
-        $this->assertEquals($workflows, $out);
+        $this->assertEquals($workflows, $this->model->getWorkflows());
     }
 
     /**
@@ -240,11 +219,45 @@ class OrganizationTest extends ModelTestCase
      */
     public function testSerialize()
     {
-        $org_id = 'org id';
-        $org_name = 'organization name';
-        $expected = ['id' => $org_id, 'name' => $org_name,];
-        $organization = new Organization((object)['id' => $org_id, 'profile' => (object)['name' => $org_name,],]);
-        $out = $organization->serialize();
-        $this->assertEquals($expected, $out);
+        $name = 'organization-name';
+        $label = 'Organization Label';
+        $this->model->id = 'org id';
+        $expected = ['id' => $this->model->id, 'name' => $name, 'label' => $label,];
+
+        $this->container->expects($this->once())
+            ->method('get')
+            ->with(Profile::class)
+            ->willReturn($this->profile);
+        $this->profile->expects($this->at(0))
+            ->method('get')
+            ->with($this->equalTo('machine_name'))
+            ->willReturn($name);
+        $this->profile->expects($this->at(1))
+            ->method('get')
+            ->with($this->equalTo('name'))
+            ->willReturn($label);
+
+        $this->assertEquals($expected, $this->model->serialize());
+    }
+
+    /**
+     * Tests the Organization::__toString() function
+     */
+    public function testToString()
+    {
+        $label = 'Organization Label';
+        $this->model->id = 'org id';
+        $expected = "{$this->model->id}: $label";
+
+        $this->container->expects($this->once())
+            ->method('get')
+            ->with(Profile::class)
+            ->willReturn($this->profile);
+        $this->profile->expects($this->at(0))
+            ->method('get')
+            ->with($this->equalTo('name'))
+            ->willReturn($label);
+
+        $this->assertEquals($expected, $this->model->__toString());
     }
 }

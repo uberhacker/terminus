@@ -3,9 +3,9 @@
 namespace Pantheon\Terminus\Commands\Multidev;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 use Pantheon\Terminus\Site\SiteAwareInterface;
 use Pantheon\Terminus\Site\SiteAwareTrait;
-use Pantheon\Terminus\Exceptions\TerminusException;
 
 /**
  * Class CreateCommand
@@ -14,6 +14,7 @@ use Pantheon\Terminus\Exceptions\TerminusException;
 class CreateCommand extends TerminusCommand implements SiteAwareInterface
 {
     use SiteAwareTrait;
+    use WorkflowProcessingTrait;
 
     /**
      * Creates a multidev environment.
@@ -30,11 +31,9 @@ class CreateCommand extends TerminusCommand implements SiteAwareInterface
      */
     public function create($site_env, $multidev)
     {
-        list($site, $env) = $this->getSiteEnv($site_env, 'dev');
+        list($site, $env) = $this->getUnfrozenSiteEnv($site_env, 'dev');
         $workflow = $site->getEnvironments()->create($multidev, $env);
-        while (!$workflow->checkProgress()) {
-            // @TODO: Add Symfony progress bar to indicate that something is happening.
-        }
+        $this->processWorkflow($workflow);
         $this->log()->notice($workflow->getMessage());
     }
 }

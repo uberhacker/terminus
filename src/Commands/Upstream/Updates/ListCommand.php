@@ -3,7 +3,6 @@
 namespace Pantheon\Terminus\Commands\Upstream\Updates;
 
 use Consolidation\OutputFormatters\StructuredData\RowsOfFields;
-use Pantheon\Terminus\Exceptions\TerminusException;
 
 /**
  * Class ListCommand
@@ -12,7 +11,8 @@ use Pantheon\Terminus\Exceptions\TerminusException;
 class ListCommand extends UpdatesCommand
 {
     /**
-     * Displays a list of new code commits available from the upstream for a site's development environment.
+     * Displays a cached list of new code commits available from the upstream for a site's development environment.
+     * Note: To refresh the cache you will need to run site:upstream:clear-cache before running this command.
      *
      * @authorize
      *
@@ -26,8 +26,6 @@ class ListCommand extends UpdatesCommand
      * @return RowsOfFields
      *
      * @param string $site_env Site & development environment
-     *
-     * @throws TerminusException
      *
      * @usage <site>.<env> Displays a list of new code commits available from the upstream for <site>'s <env> environment.
      */
@@ -44,6 +42,16 @@ class ListCommand extends UpdatesCommand
                 'author' => $commit->author,
             ];
         }
+
+        usort(
+            $data,
+            function ($a, $b) {
+                if (strtotime($a['datetime']) === strtotime($b['datetime'])) {
+                    return 0;
+                }
+                return (strtotime($a['datetime']) > strtotime($b['datetime'])) ? -1 : 1;
+            }
+        );
 
         if (empty($data)) {
             $this->log()->warning('There are no available updates for this site.');

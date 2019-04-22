@@ -3,6 +3,8 @@
 namespace Pantheon\Terminus\UnitTests\Commands\Env;
 
 use Pantheon\Terminus\Commands\Env\DeployCommand;
+use Pantheon\Terminus\Exceptions\TerminusException;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class DeployCommandTest
@@ -11,6 +13,8 @@ use Pantheon\Terminus\Commands\Env\DeployCommand;
  */
 class DeployCommandTest extends EnvCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * @inheritdoc
      */
@@ -18,8 +22,10 @@ class DeployCommandTest extends EnvCommandTest
     {
         parent::setUp();
         $this->command = new DeployCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSites($this->sites);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -29,14 +35,12 @@ class DeployCommandTest extends EnvCommandTest
     {
         $this->environment->id = 'test';
 
-        $this->environment->expects($this->once())
+        $this->environment->expects($this->exactly(2))
             ->method('isInitialized')
             ->willReturn(true);
-
         $this->environment->expects($this->once())
             ->method('hasDeployableCode')
             ->willReturn(true);
-
         $this->environment->expects($this->once())
             ->method('deploy')
             ->willReturn($this->workflow)
@@ -52,14 +56,9 @@ class DeployCommandTest extends EnvCommandTest
                 ]
             ]);
 
-        $this->workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
-
         // Run the deploy.
         $this->command->deploy(
-            'mysite.test',
+            "mysite.{$this->environment->id}",
             ['sync-content' => true, 'note' => 'Deploy from Terminus', 'cc' => false, 'updatedb' => false,]
         );
     }
@@ -74,19 +73,16 @@ class DeployCommandTest extends EnvCommandTest
         $this->environment->expects($this->once())
             ->method('isInitialized')
             ->willReturn(true);
-
         $this->environment->expects($this->once())
             ->method('hasDeployableCode')
             ->willReturn(false);
-
         $this->environment->expects($this->never())
             ->method('deploy');
-
         $this->logger->expects($this->once())
             ->method('log');
 
         // Run the deploy.
-        $this->command->deploy('mysite.test');
+        $this->command->deploy("mysite.{$this->environment->id}");
     }
 
     /**
@@ -99,11 +95,9 @@ class DeployCommandTest extends EnvCommandTest
         $this->environment->expects($this->once())
             ->method('isInitialized')
             ->willReturn(true);
-
         $this->environment->expects($this->once())
             ->method('hasDeployableCode')
             ->willReturn(true);
-
         $this->environment->expects($this->once())
             ->method('deploy')
             ->willReturn($this->workflow)
@@ -113,40 +107,87 @@ class DeployCommandTest extends EnvCommandTest
                 'annotation' => 'Deploy from Terminus',
             ]);
 
-        $this->workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
-
         // Run the deploy.
         $this->command->deploy(
-            'mysite.live',
+            "mysite.{$this->environment->id}",
             ['sync-content' => true, 'note' => 'Deploy from Terminus', 'cc' => true, 'updatedb' => true,]
         );
     }
 
     /**
-     * Tests the env:deploy command when the environment is uninitialized
+     * Tests the env:deploy command when the environment is uninitialized and a deploy message is supplied
      */
-    public function testDeployUninitialized()
+    public function testDeployUninitializedWithMessage()
+    {
+        $this->environment->id = 'uninitialized';
+        $note = 'Never running from a real fight';
+
+        $this->environment->expects($this->once())
+            ->method('isInitialized')
+            ->willReturn(false);
+        $this->environment->expects($this->once())
+            ->method('initializeBindings')
+            ->with(['annotation' => $note,])
+            ->willReturn($this->workflow);
+
+        // Run the deploy.
+        $this->command->deploy("mysite.{$this->environment->id}", compact('note'));
+    }
+
+    /**
+     * Tests the env:deploy command when the environment is uninitialized and no deploy message is given
+     */
+    public function testDeployUninitializedWithoutMessage()
     {
         $this->environment->id = 'uninitialized';
 
         $this->environment->expects($this->once())
             ->method('isInitialized')
             ->willReturn(false);
-
         $this->environment->expects($this->once())
             ->method('initializeBindings')
-            ->willReturn($this->workflow)
-            ->with();
-
-        $this->workflow->expects($this->once())
-            ->method('checkProgress')
             ->with()
-            ->willReturn(true);
+            ->willReturn($this->workflow);
 
         // Run the deploy.
-        $this->command->deploy('mysite.uninitialized');
+        $this->command->deploy("mysite.{$this->environment->id}");
+    }
+
+    /**
+     * Tests the env:deploy command when trying to sync from an uninitialized environment
+     */
+    public function testDeploySyncFromUninitialized()
+    {
+        $this->environment->id = 'test';
+        $site_name = 'site name';
+
+        $this->environment->expects($this->at(0))
+            ->method('isInitialized')
+            ->willReturn(true);
+        $this->environment->expects($this->once())
+            ->method('hasDeployableCode')
+            ->willReturn(true);
+        $this->environment->expects($this->at(1))
+            ->method('isInitialized')
+            ->willReturn(false);
+        $this->site->expects($this->once())
+            ->method('getName')
+            ->willReturn($site_name);
+        $this->environment->expects($this->never())
+            ->method('deploy');
+        $this->site->expects($this->once())
+            ->method('isFrozen')
+            ->willReturn(false);
+
+        $this->setExpectedException(
+            TerminusException::class,
+            "$site_name's live environment cannot be cloned because it has not been initialized."
+        );
+
+        // Run the deploy.
+        $this->command->deploy(
+            "$site_name.{$this->environment->id}",
+            ['sync-content' => true, 'note' => 'Deploy from Terminus', 'cc' => false, 'updatedb' => false,]
+        );
     }
 }

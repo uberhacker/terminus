@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\UnitTests\Models;
 
 use Pantheon\Terminus\Models\Environment;
+use Pantheon\Terminus\Models\Site;
 use Pantheon\Terminus\Models\UpstreamStatus;
 
 /**
@@ -36,9 +37,13 @@ class UpstreamStatusTest extends ModelTestCase
             ->disableOriginalConstructor()
             ->getMock();
         $this->environment->id = 'environment id';
-        $this->environment->site = (object)['id' => 'site id',];
+        $site = $this->getMockBuilder(Site::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $site->id = 'site id';
         $base_branch = "refs/heads/{$this->environment->id}";
-        $this->request_url = "sites/{$this->environment->site->id}/code-upstream-updates?base_branch=$base_branch";
+        $this->request_url = "sites/{$site->id}/code-upstream-updates?base_branch=$base_branch";
+        $this->environment->method('getSite')->willReturn($site);
 
         $this->environment->expects($this->once())
             ->method('getBranchName')
@@ -54,11 +59,7 @@ class UpstreamStatusTest extends ModelTestCase
      */
     public function testGetStatusCurrent()
     {
-        $this->request->expects($this->once())
-            ->method('request')
-            ->with($this->equalTo($this->request_url))
-            ->willReturn(['data' => (object)['behind' => 0,],]);
-
+        $this->expectIsCurrent();
         $this->assertEquals('current', $this->model->getStatus());
     }
 
@@ -67,11 +68,7 @@ class UpstreamStatusTest extends ModelTestCase
      */
     public function testGetStatusOutdated()
     {
-        $this->request->expects($this->once())
-            ->method('request')
-            ->with($this->equalTo($this->request_url))
-            ->willReturn(['data' => (object)['behind' => 1,],]);
-
+        $this->expectIsBehind();
         $this->assertEquals('outdated', $this->model->getStatus());
     }
 
@@ -81,39 +78,112 @@ class UpstreamStatusTest extends ModelTestCase
     public function testGetUpdates()
     {
         $expected = 'return me';
-
-        $this->request->expects($this->once())
-            ->method('request')
-            ->with($this->equalTo($this->request_url))
-            ->willReturn(['data' => $expected,]);
-
+        $this->expectRequest($expected);
         $out = $this->model->getUpdates();
         $this->assertEquals($expected, $out);
     }
 
     /**
-     * Tests UpstreamStatus::hasUpdates() when there are no updates
+     * Tests UpstreamStatus::hasUpdates() when there are no updates and the environment is test or live
      */
     public function testHasNoUpdates()
     {
-        $this->request->expects($this->once())
-            ->method('request')
-            ->with($this->equalTo($this->request_url))
-            ->willReturn(['data' => (object)['behind' => 0,],]);
-
+        $return_data = (object)[
+            $this->environment->id => (object)['is_up_to_date_with_upstream' => true,],
+            'test' => (object)['is_up_to_date_with_upstream' => true,],
+        ];
+        $this->expectIsDevelopment(false);
+        $this->expectRequest($return_data);
         $this->assertFalse($this->model->hasUpdates());
     }
 
     /**
-     * Tests UpstreamStatus::hasUpdates() when there are updates
+     * Tests UpstreamStatus::hasUpdates() when there are updates and the environment is test or live and the named env is outdated
      */
     public function testHasUpdates()
+    {
+        $return_data = (object)[
+            $this->environment->id => (object)['is_up_to_date_with_upstream' => false,],
+            'test' => (object)['is_up_to_date_with_upstream' => true,],
+        ];
+        $this->expectIsDevelopment(false);
+        $this->expectRequest($return_data);
+        $this->assertTrue($this->model->hasUpdates());
+    }
+
+    /**
+     * Tests UpstreamStatus::hasUpdates() when there are updates and the environment is test or live and the named env's parent is outdated
+     */
+    public function testHasUpdatesFromParent()
+    {
+        $return_data = (object)[
+            $this->environment->id => (object)['is_up_to_date_with_upstream' => true,],
+            'test' => (object)['is_up_to_date_with_upstream' => false,],
+        ];
+        $this->expectIsDevelopment(false);
+        $this->expectRequest($return_data);
+        $this->assertTrue($this->model->hasUpdates());
+    }
+
+    /**
+     * Tests UpstreamStatus::hasUpdates() when there are no updates and the environment is a dev environment
+     */
+    public function testHasNoUpdatesDev()
+    {
+        $this->expectIsCurrent();
+        $this->assertFalse($this->model->hasUpdates());
+    }
+
+    /**
+     * Tests UpstreamStatus::hasUpdates() when there are updates and the environment is a dev environment
+     */
+    public function testHasUpdatesDev()
+    {
+        $this->expectIsBehind();
+        $this->assertTrue($this->model->hasUpdates());
+    }
+
+    /**
+     * Sets the test to expect a result saying that the dev environment is behind on updates
+     */
+    private function expectIsBehind()
+    {
+        $this->expectIsDevelopment();
+        $this->expectRequest((object)['behind' => 1,]);
+    }
+
+    /**
+     * Sets the test to expect a result saying that the dev environment is current on updates
+     */
+    private function expectIsCurrent()
+    {
+        $this->expectIsDevelopment();
+        $this->expectRequest((object)['behind' => 0,]);
+    }
+
+    /**
+     * Sets the test to expect a call to isDevelopment with the set return value
+     *
+     * @param boolean
+     */
+    private function expectIsDevelopment($is_dev = true)
+    {
+        $this->environment->expects($this->once())
+            ->method('isDevelopment')
+            ->with()
+            ->willReturn($is_dev);
+    }
+
+    /**
+     * Sets the test to expect a request with specific returned data
+     *
+     * @param mixed
+     */
+    private function expectRequest($return_data = null)
     {
         $this->request->expects($this->once())
             ->method('request')
             ->with($this->equalTo($this->request_url))
-            ->willReturn(['data' => (object)['behind' => 1,],]);
-
-        $this->assertTrue($this->model->hasUpdates());
+            ->willReturn(['data' => $return_data,]);
     }
 }

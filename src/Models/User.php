@@ -11,59 +11,62 @@ use Pantheon\Terminus\Collections\Upstreams;
 use Pantheon\Terminus\Collections\UserOrganizationMemberships;
 use Pantheon\Terminus\Collections\UserSiteMemberships;
 use Pantheon\Terminus\Collections\Workflows;
-use Robo\Common\ConfigAwareTrait;
-use Robo\Contract\ConfigAwareInterface;
+use Pantheon\Terminus\Friends\OrganizationsInterface;
+use Pantheon\Terminus\Friends\OrganizationsTrait;
+use Pantheon\Terminus\Friends\ProfileInterface;
+use Pantheon\Terminus\Friends\ProfileTrait;
+use Pantheon\Terminus\Friends\SitesInterface;
+use Pantheon\Terminus\Friends\SitesTrait;
 
 /**
  * Class User
  * @package Pantheon\Terminus\Models
  */
-class User extends TerminusModel implements ConfigAwareInterface, ContainerAwareInterface
+class User extends TerminusModel implements
+    ContainerAwareInterface,
+    OrganizationsInterface,
+    ProfileInterface,
+    SitesInterface
 {
-    use ConfigAwareTrait;
     use ContainerAwareTrait;
+    use OrganizationsTrait;
+    use ProfileTrait;
+    use SitesTrait;
 
+    const PRETTY_NAME = 'user';
+    /**
+     * @var string
+     */
+    protected $url = 'users/{id}';
     /**
      * @var \stdClass
      * @todo Wrap this in a proper class.
      */
-    protected $aliases;
+    private $aliases;
     /**
      * @var PaymentMethods
      */
-    protected $payment_methods;
+    private $payment_methods;
     /**
      * @var PaymentMethods
      */
-    protected $machine_tokens;
+    private $machine_tokens;
     /**
      * @var UserOrganizationMemberships
      */
-    protected $org_memberships;
+    private $org_memberships;
     /**
      * @var UserSiteMemberships
      */
-    protected $site_memberships;
+    private $site_memberships;
     /**
      * @var SSHKeys
      */
-    protected $ssh_keys;
+    private $ssh_keys;
     /**
      * @var Workflows
      */
-    protected $workflows;
-
-    /**
-     * Object constructor
-     *
-     * @param object $attributes Attributes of this model
-     * @param array $options Options with which to configure this model
-     */
-    public function __construct($attributes = null, array $options = [])
-    {
-        parent::__construct($attributes, $options);
-        $this->url = "users/{$this->id}";
-    }
+    private $workflows;
 
     /**
      * Provides Pantheon Dashboard URL for this user
@@ -72,89 +75,8 @@ class User extends TerminusModel implements ConfigAwareInterface, ContainerAware
      */
     public function dashboardUrl()
     {
-        $url = sprintf(
-            '%s://%s/users/%s#sites',
-            $this->getConfig()->get('dashboard_protocol'),
-            $this->getConfig()->get('dashboard_host'),
-            $this->id
-        );
-
-        return $url;
-    }
-
-    /**
-     * Retrieves organization data for this user
-     *
-     * @return Organization[]
-     */
-    public function getOrganizations()
-    {
-        $org_memberships = $this->getOrgMemberships()->all();
-        $organizations = array_combine(
-            array_map(
-                function ($membership) {
-                    return $membership->getOrganization()->id;
-                },
-                $org_memberships
-            ),
-            array_map(
-                function ($membership) {
-                    return $membership->getOrganization();
-                },
-                $org_memberships
-            )
-        );
-        return $organizations;
-    }
-
-    /**
-     * Requests API data and returns an object of user site data
-     *
-     * @return Site[]
-     */
-    public function getSites()
-    {
-        $site_memberships = $this->getSiteMemberships()->all();
-
-        $sites = array_combine(
-            array_map(
-                function ($membership) {
-                    return $membership->getSite()->get('id');
-                },
-                $site_memberships
-            ),
-            array_map(
-                function ($membership) {
-                    return $membership->getSite();
-                },
-                $site_memberships
-            )
-        );
-        return $sites;
-    }
-
-    /**
-     * Formats User object into an associative array for output
-     *
-     * @return array $data associative array of data for output
-     */
-    public function serialize()
-    {
-        $first_name = $last_name = null;
-        if (isset($this->get('profile')->firstname)) {
-            $first_name = $this->get('profile')->firstname;
-        }
-        if (isset($this->get('profile')->lastname)) {
-            $last_name = $this->get('profile')->lastname;
-        }
-
-        $data = [
-            'firstname' => $first_name,
-            'lastname' => $last_name,
-            'email' => $this->get('email'),
-            'id' => $this->id,
-        ];
-        return $data;
+        $config = $this->getConfig();
+        return "{$config->get('dashboard_protocol')}://{$config->get('dashboard_host')}/users/{$this->id}#sites";
     }
 
     /**
@@ -175,7 +97,7 @@ class User extends TerminusModel implements ConfigAwareInterface, ContainerAware
      */
     private function fetchAliases()
     {
-        $path = "users/{$this->id}/drush_aliases";
+        $path = "{$this->getUrl()}/drush_aliases";
         $options = ['method' => 'get',];
         $response = $this->request->request($path, $options);
 
@@ -183,45 +105,14 @@ class User extends TerminusModel implements ConfigAwareInterface, ContainerAware
     }
 
     /**
-     * @return Pantheon\Terminus\Collections\PaymentMethods
-     */
-    public function getPaymentMethods()
-    {
-        if (empty($this->payment_methods)) {
-            $this->payment_methods = $this->getContainer()->get(PaymentMethods::class, [['user' => $this,]]);
-        }
-        return $this->payment_methods;
-    }
-
-    /**
-     * @return \Terminus\Collections\PaymentMethods
+     * @return MachineTokens
      */
     public function getMachineTokens()
     {
         if (empty($this->machine_tokens)) {
-            $this->machine_tokens = $this->getContainer()->get(MachineTokens::class, [['user' => $this,]]);
+            $this->machine_tokens = $this->getContainer()->get(MachineTokens::class, [['user' => $this,],]);
         }
         return $this->machine_tokens;
-    }
-
-    /**
-     * @return \Terminus\Collections\UserOrganizationMemberships
-     */
-    public function getOrgMemberships()
-    {
-        if (empty($this->org_memberships)) {
-            $this->org_memberships = $this->getContainer()
-                ->get(UserOrganizationMemberships::class, [['user' => $this,]]);
-        }
-        return $this->org_memberships;
-    }
-
-    /**
-     * @return object
-     */
-    public function getProfile()
-    {
-        return $this->get('profile');
     }
 
     /**
@@ -231,50 +122,97 @@ class User extends TerminusModel implements ConfigAwareInterface, ContainerAware
      */
     public function getName()
     {
-        return $this->getProfile()->full_name;
+        return $this->getProfile()->get('full_name');
     }
 
     /**
-     * @return \Terminus\Collections\UserSiteMemberships
+     * @return UserOrganizationMemberships
+     */
+    public function getOrganizationMemberships()
+    {
+        if (empty($this->org_memberships)) {
+            $this->org_memberships = $this->getContainer()
+                ->get(UserOrganizationMemberships::class, [['user' => $this,],]);
+        }
+        return $this->org_memberships;
+    }
+
+    /**
+     * @return PaymentMethods
+     */
+    public function getPaymentMethods()
+    {
+        if (empty($this->payment_methods)) {
+            $this->payment_methods = $this->getContainer()->get(PaymentMethods::class, [['user' => $this,],]);
+        }
+        return $this->payment_methods;
+    }
+
+    /**
+     * @return string[]
+     */
+    public function getReferences()
+    {
+        return [$this->id, $this->getName(), $this->get('email'),];
+    }
+
+    /**
+     * @return UserSiteMemberships
      */
     public function getSiteMemberships()
     {
         if (empty($this->site_memberships)) {
-            $this->site_memberships = $this->getContainer()->get(UserSiteMemberships::class, [['user' => $this,]]);
+            $this->site_memberships = $this->getContainer()->get(UserSiteMemberships::class, [['user' => $this,],]);
         }
         return $this->site_memberships;
     }
 
     /**
-     * @return \Terminus\Collections\SSHKeys
+     * @return SSHKeys
      */
     public function getSSHKeys()
     {
         if (empty($this->ssh_keys)) {
-            $this->ssh_keys = $this->getContainer()->get(SSHKeys::class, [['user' => $this,]]);
+            $this->ssh_keys = $this->getContainer()->get(SSHKeys::class, [['user' => $this,],]);
         }
         return $this->ssh_keys;
     }
 
     /**
-     * @return Pantheon\Terminus\Collections\Workflows
+     * @return Upstreams
      */
     public function getUpstreams()
     {
         if (empty($this->upstreams)) {
-            $this->upstreams = $this->getContainer()->get(Upstreams::class, [['user' => $this,]]);
+            $this->upstreams = $this->getContainer()->get(Upstreams::class, [['user' => $this,],]);
         }
         return $this->upstreams;
     }
 
     /**
-     * @return \Pantheon\Terminus\Collections\Workflows
+     * @return Workflows
      */
     public function getWorkflows()
     {
         if (empty($this->workflows)) {
-            $this->workflows = $this->getContainer()->get(Workflows::class, [['user' => $this,]]);
+            $this->workflows = $this->getContainer()->get(Workflows::class, [['user' => $this,],]);
         }
         return $this->workflows;
+    }
+
+    /**
+     * Formats User object into an associative array for output
+     *
+     * @return array $data associative array of data for output
+     */
+    public function serialize()
+    {
+        $profile = $this->getProfile();
+        return [
+            'firstname' => $profile->get('firstname'),
+            'lastname' => $profile->get('lastname'),
+            'email' => $this->get('email'),
+            'id' => $this->id,
+        ];
     }
 }

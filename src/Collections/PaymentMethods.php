@@ -12,6 +12,7 @@ use Pantheon\Terminus\Models\PaymentMethod;
  */
 class PaymentMethods extends UserOwnedCollection
 {
+    const PRETTY_NAME = 'payment methods';
     /**
      * @var string
      */
@@ -31,16 +32,13 @@ class PaymentMethods extends UserOwnedCollection
      */
     public function get($id)
     {
-        $payment_methods = $this->getMembers();
+        $payment_methods = $this->all();
         if (isset($payment_methods[$id])) {
             return $payment_methods[$id];
         }
-        $matches = array_filter(
-            $payment_methods,
-            function ($payment_method) use ($id) {
-                return ($payment_method->get('label') == $id);
-            }
-        );
+        $matches = array_filter($payment_methods, function ($payment_method) use ($id) {
+            return ($payment_method->get('label') == $id);
+        });
         if (empty($matches)) {
             throw new TerminusNotFoundException(
                 'Could not locate a payment method identified by {id} on this account.',

@@ -2,8 +2,11 @@
 
 namespace Pantheon\Terminus\UnitTests\Commands\Remote;
 
+use League\Container\Container;
 use Pantheon\Terminus\Exceptions\TerminusProcessException;
+use Pantheon\Terminus\Helpers\LocalMachineHelper;
 use Pantheon\Terminus\UnitTests\Commands\CommandTestCase;
+use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Process\ProcessUtils;
 
 /**
@@ -14,15 +17,35 @@ use Symfony\Component\Process\ProcessUtils;
 class SSHBaseCommandTest extends CommandTestCase
 {
     /**
+     * @var LocalMachineHelper
+     */
+    protected $local_machine_helper;
+
+    /**
      * @inheritdoc
      */
     protected function setUp()
     {
         parent::setUp();
 
-        $this->command = new DummyCommand($this->getConfig());
+        $this->container = $this->getMockBuilder(Container::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $this->local_machine_helper = $this->getMockBuilder(LocalMachineHelper::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $this->container->method('get')
+            ->with(LocalMachineHelper::class)
+            ->willReturn($this->local_machine_helper);
+        $this->local_machine_helper->method('exec_interactive')
+            ->willReturn(['output' => 'output', 'exit_code' => 0,]);
+
+        $this->command = new DummyCommand();
+        $this->command->setConfig($this->getConfig());
         $this->command->setSites($this->sites);
         $this->command->setLogger($this->logger);
+        $this->command->setContainer($this->container);
     }
 
     /**
@@ -30,11 +53,13 @@ class SSHBaseCommandTest extends CommandTestCase
      */
     public function testExecuteCommand()
     {
-        $dummy_output = 'dummy output';
         $options = ['arg1', 'arg2', '<escape me>',];
         $site_name = 'site name';
         $mode = 'sftp';
 
+        $this->environment->expects($this->once())
+            ->method('isDevelopment')
+            ->willReturn(true);
         $this->environment->expects($this->once())
             ->method('get')
             ->with($this->equalTo('connection_mode'))
@@ -52,11 +77,11 @@ class SSHBaseCommandTest extends CommandTestCase
                 $this->equalTo('Command: {site}.{env} -- {command} [Exit: {exit}]')
             );
         $this->environment->expects($this->once())
-            ->method('sendCommandViaSsh')
-            ->willReturn(['output' => $dummy_output, 'exit_code' => 0,]);
+            ->method('sftpConnectionInfo')
+            ->willReturn(['username' => 'THE USER NAME', 'host' => 'THE HOST', 'port' => 'THE PORT',]);
 
         $out = $this->command->dummyCommand("$site_name.env", $options);
-        $this->assertEquals($dummy_output, $out);
+        $this->assertNull($out);
     }
 
     /**
@@ -70,10 +95,18 @@ class SSHBaseCommandTest extends CommandTestCase
         $mode = 'sftp';
         $status_code = 1;
         $this->environment->id = 'env_id';
-        $command = 'dummy ' . implode(' ', $options);
+        $sftp_info = [
+            'host' => 'THE HOST',
+            'port' => 'THE PORT',
+            'username' => 'THE USER NAME',
+        ];
+        $return_data = ['output' => $dummy_output, 'exit_code' => $status_code,];
 
-        $expectedEscapedCommand = ProcessUtils::escapeArgument($command);
+        $expectedLoggedCommand = 'dummy arg1 arg2';
 
+        $this->environment->expects($this->once())
+            ->method('isDevelopment')
+            ->willReturn(true);
         $this->environment->expects($this->once())
             ->method('get')
             ->with($this->equalTo('connection_mode'))
@@ -85,9 +118,12 @@ class SSHBaseCommandTest extends CommandTestCase
             )
             ->willReturnOnConsecutiveCalls($site_name, $site_name);
         $this->environment->expects($this->once())
-            ->method('sendCommandViaSsh')
-            ->with($this->equalTo($command))
-            ->willReturn(['output' => $dummy_output, 'exit_code' => $status_code,]);
+            ->method('sftpConnectionInfo')
+            ->with()
+            ->willReturn($sftp_info);
+        $this->local_machine_helper->expects($this->once())
+            ->method('execute')
+            ->willReturn($return_data);
         $this->logger->expects($this->once())
             ->method('log')
             ->with(
@@ -96,7 +132,7 @@ class SSHBaseCommandTest extends CommandTestCase
                 $this->equalTo([
                     'site' => $site_name,
                     'env' => $this->environment->id,
-                    'command' => "$expectedEscapedCommand",
+                    'command' => "$expectedLoggedCommand",
                     'exit' => $status_code,
                 ])
             );
@@ -112,15 +148,21 @@ class SSHBaseCommandTest extends CommandTestCase
      */
     public function testExecuteCommandInGitMode()
     {
-        $dummy_output = 'dummy output';
-        $options = ['arg1', 'arg2',];
+        $options = ['arg1', 'arg2', '--secret', 'somesecret'];
         $site_name = 'site name';
         $mode = 'git';
         $status_code = 0;
-        $command = 'dummy ' . implode(' ', $options);
+        $sftp_info = [
+            'host' => 'THE HOST',
+            'port' => 'THE PORT',
+            'username' => 'THE USER NAME',
+        ];
 
-        $expectedEscapedCommand = ProcessUtils::escapeArgument($command);
+        $expectedLoggedCommand = 'dummy arg1 arg2';
 
+        $this->environment->expects($this->once())
+            ->method('isDevelopment')
+            ->willReturn(true);
         $this->environment->expects($this->once())
             ->method('get')
             ->with($this->equalTo('connection_mode'))
@@ -148,16 +190,15 @@ class SSHBaseCommandTest extends CommandTestCase
                 $this->equalTo([
                     'site' => $site_name,
                     'env' => $this->environment->id,
-                    'command' => "$expectedEscapedCommand",
+                    'command' => "$expectedLoggedCommand",
                     'exit' => $status_code,
                 ])
             );
         $this->environment->expects($this->once())
-            ->method('sendCommandViaSsh')
-            ->with($this->equalTo('dummy ' . implode(' ', $options)))
-            ->willReturn(['output' => $dummy_output, 'exit_code' => $status_code,]);
+            ->method('sftpConnectionInfo')
+            ->willReturn($sftp_info);
 
         $out = $this->command->dummyCommand("$site_name.env", $options);
-        $this->assertEquals($dummy_output, $out);
+        $this->assertNull($out);
     }
 }

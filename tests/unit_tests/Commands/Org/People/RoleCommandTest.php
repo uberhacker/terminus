@@ -4,6 +4,7 @@ namespace Pantheon\Terminus\UnitTests\Commands\Org\People;
 
 use Pantheon\Terminus\Commands\Org\People\RoleCommand;
 use Pantheon\Terminus\Models\Workflow;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class RoleCommandTest
@@ -12,6 +13,8 @@ use Pantheon\Terminus\Models\Workflow;
  */
 class RoleCommandTest extends OrgPeopleCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * @inheritdoc
      */
@@ -20,8 +23,10 @@ class RoleCommandTest extends OrgPeopleCommandTest
         parent::setUp();
 
         $this->command = new RoleCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSession($this->session);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -45,21 +50,18 @@ class RoleCommandTest extends OrgPeopleCommandTest
             ->method('setRole')
             ->with($this->equalTo($role))
             ->willReturn($workflow);
-        $workflow->expects($this->once())
-            ->method('checkProgress')
-            ->willReturn(true);
         $this->organization->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)['name' => $org_name,]);
+            ->method('getName')
+            ->with()
+            ->willReturn($org_name);
         $this->org_user_membership->expects($this->once())
             ->method('getUser')
             ->with()
             ->willReturn($this->user);
         $this->user->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)compact('full_name'));
+            ->method('getName')
+            ->with()
+            ->willReturn($full_name);
 
         $this->logger->expects($this->once())
             ->method('log')

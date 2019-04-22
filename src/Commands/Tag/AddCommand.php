@@ -2,18 +2,12 @@
 
 namespace Pantheon\Terminus\Commands\Tag;
 
-use Pantheon\Terminus\Commands\TerminusCommand;
-use Pantheon\Terminus\Site\SiteAwareInterface;
-use Pantheon\Terminus\Site\SiteAwareTrait;
-
 /**
  * Class AddCommand
  * @package Pantheon\Terminus\Commands\Tag
  */
-class AddCommand extends TerminusCommand implements SiteAwareInterface
+class AddCommand extends TagCommand
 {
-    use SiteAwareTrait;
-
     /**
      * Adds a tag on a site within an organization.
      *
@@ -22,19 +16,18 @@ class AddCommand extends TerminusCommand implements SiteAwareInterface
      * @command tag:add
      *
      * @param string $site_name Site name
-     * @param string $organization Organization name or UUID
+     * @param string $organization Organization name, label, or ID
      * @param string $tag Tag
      *
      * @usage <site> <org> <tag> Adds the <tag> tag to <site> within <org>.
      */
     public function add($site_name, $organization, $tag)
     {
-        $org = $this->session()->getUser()->getOrgMemberships()->get($organization)->getOrganization();
-        $site = $org->getSiteMemberships()->get($site_name)->getSite();
-        $site->tags->create($tag);
+        list($org, $site, $tags) = $this->getModels($site_name, $organization);
+        $tags->create($tag);
         $this->log()->notice(
             '{org} has tagged {site} with {tag}.',
-            ['org' => $org->get('profile')->name, 'site' => $site->get('name'), 'tag' => $tag,]
+            ['org' => $org->getName(), 'site' => $site->getName(), 'tag' => $tag,]
         );
     }
 }

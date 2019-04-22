@@ -4,6 +4,7 @@ namespace Pantheon\Terminus\UnitTests\Commands\Org\People;
 
 use Pantheon\Terminus\Commands\Org\People\RemoveCommand;
 use Pantheon\Terminus\Models\Workflow;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class RemoveCommandTest
@@ -12,6 +13,8 @@ use Pantheon\Terminus\Models\Workflow;
  */
 class RemoveCommandTest extends OrgPeopleCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * @inheritdoc
      */
@@ -20,8 +23,10 @@ class RemoveCommandTest extends OrgPeopleCommandTest
         parent::setUp();
 
         $this->command = new RemoveCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSession($this->session);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -44,21 +49,18 @@ class RemoveCommandTest extends OrgPeopleCommandTest
             ->method('delete')
             ->with()
             ->willReturn($workflow);
-        $workflow->expects($this->once())
-            ->method('checkProgress')
-            ->willReturn(true);
         $this->organization->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)['name' => $org_name,]);
+            ->method('getName')
+            ->with()
+            ->willReturn($org_name);
         $this->org_user_membership->expects($this->once())
             ->method('getUser')
             ->with()
             ->willReturn($this->user);
         $this->user->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)compact('full_name'));
+            ->method('getName')
+            ->with()
+            ->willReturn($full_name);
 
         $this->logger->expects($this->once())
             ->method('log')

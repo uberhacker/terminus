@@ -4,6 +4,7 @@ namespace Pantheon\Terminus\Commands\Workflow;
 
 use Consolidation\OutputFormatters\StructuredData\RowsOfFields;
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\StructuredListTrait;
 use Pantheon\Terminus\Site\SiteAwareInterface;
 use Pantheon\Terminus\Site\SiteAwareTrait;
 
@@ -14,6 +15,7 @@ use Pantheon\Terminus\Site\SiteAwareTrait;
 class ListCommand extends TerminusCommand implements SiteAwareInterface
 {
     use SiteAwareTrait;
+    use StructuredListTrait;
 
     /**
      * Displays the list of the workflows for a site.
@@ -42,14 +44,12 @@ class ListCommand extends TerminusCommand implements SiteAwareInterface
     public function wfList($site_id)
     {
         $site = $this->getSite($site_id);
-        $workflows = $site->getWorkflows()->fetch(['paged' => false])->serialize();
-
-        if (count($workflows) == 0) {
-            $this->log()->warning(
-                'No workflows have been run on {site}.',
-                ['site' => $site->get('name')]
-            );
-        }
-        return new RowsOfFields($workflows);
+        return $this->getRowsOfFields(
+            $site->getWorkflows()->setPaging(false)->fetch(),
+            [
+                'message' => 'No workflows have been run on {site}.',
+                'message_options' => ['site' => $site->get('name'),],
+            ]
+        );
     }
 }

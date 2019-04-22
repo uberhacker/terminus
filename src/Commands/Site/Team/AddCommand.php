@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\Commands\Site\Team;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 use Pantheon\Terminus\Site\SiteAwareInterface;
 use Pantheon\Terminus\Site\SiteAwareTrait;
 
@@ -13,6 +14,7 @@ use Pantheon\Terminus\Site\SiteAwareTrait;
 class AddCommand extends TerminusCommand implements SiteAwareInterface
 {
     use SiteAwareTrait;
+    use WorkflowProcessingTrait;
 
     /**
      * Adds a user to a site's team.
@@ -26,14 +28,15 @@ class AddCommand extends TerminusCommand implements SiteAwareInterface
      * @param string $member Email of user
      * @param string $role [developer|team_member] Role
      *
+     * @usage <site> <user> Adds <user> as a team_member to <site>'s team.
      * @usage <site> <user> <role> Adds <user> as a <role> to <site>'s team.
      */
-    public function add($site_id, $member, $role)
+    public function add($site_id, $member, $role = 'team_member')
     {
         $site = $this->getSite($site_id);
         $team = $site->getUserMemberships();
 
-        if (!(boolean)$site->getFeature('change_management')) {
+        if (($role !== 'team_member') && !(boolean)$site->getFeature('change_management')) {
             $role = 'team_member';
             $this->log()->warning(
                 'Site does not have change management enabled, defaulting to user role {role}.',
@@ -41,9 +44,7 @@ class AddCommand extends TerminusCommand implements SiteAwareInterface
             );
         }
         $workflow = $team->create($member, $role);
-        while (!$workflow->checkProgress()) {
-            // @TODO: Add Symfony progress bar to indicate that something is happening.
-        }
+        $this->processWorkflow($workflow);
         $this->log()->notice($workflow->getMessage());
     }
 }

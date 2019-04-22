@@ -5,19 +5,22 @@ namespace Pantheon\Terminus\Plugins;
 use Consolidation\AnnotatedCommand\CommandFileDiscovery;
 use Pantheon\Terminus\Exceptions\TerminusException;
 
+/**
+ * Class PluginInfo
+ * @package Pantheon\Terminus\Plugins
+ */
 class PluginInfo
 {
     const MAX_COMMAND_DEPTH = 4;
 
     /**
-     * @var string
-     */
-    protected $plugin_dir;
-
-    /**
      * @var null|array
      */
     protected $info = null;
+    /**
+     * @var string
+     */
+    protected $plugin_dir;
 
     /**
      * PluginInfo constructor.
@@ -30,13 +33,21 @@ class PluginInfo
     }
 
     /**
-     * Get the info array for the plugin.
+     * Register an autoloader for the class files from the plugin itself
+     * at plugin discovery time.  Note that the classes from libraries that
+     * the plugin dependes on (from the `require` section of its composer.json)
+     * are not available until one of its commands is called.
      *
-     * @return array|null|string
+     * @param Composer\Autoload\ClassLoader $loader
      */
-    public function getInfo()
+    public function autoloadPlugin($loader)
     {
-        return $this->info;
+        if ($this->usesAutoload()) {
+            $info = $this->getInfo();
+            foreach ($info['autoload']['psr-4'] as $prefix => $path) {
+                $loader->addPsr4($prefix, $this->plugin_dir . DIRECTORY_SEPARATOR . $path);
+            }
+        }
     }
 
     /**
@@ -52,13 +63,86 @@ class PluginInfo
         $discovery->setSearchPattern('*Command.php')->setSearchLocations([])->setSearchDepth(self::MAX_COMMAND_DEPTH);
         $command_files = $discovery->discover($path, $namespace);
 
-        // @TODO: Decide if we should require an autoloader for plugins or just include the command files here.
-        $file_names = array_keys($command_files);
-        foreach ($file_names as $file) {
-            include $file;
+        // If this plugin uses autoloading, then its autoloader will
+        // have already been configured via autoloadPlugin(), below.
+        // Otherwise, we will include all of its source files here.
+        if (!$this->usesAutoload()) {
+            $file_names = array_keys($command_files);
+            foreach ($file_names as $file) {
+                include $file;
+            }
         }
 
         return $command_files;
+    }
+
+    /**
+     * Get the compatible Terminus version.
+     *
+     * @return string A version constraint string defining what versions of Terminus this plugin works with.
+     */
+    public function getCompatibleTerminusVersion()
+    {
+        return $this->getInfo()['extra']['terminus']['compatible-version'];
+    }
+
+    /**
+     * Get the info array for the plugin.
+     *
+     * @return array|null|string
+     */
+    public function getInfo()
+    {
+        return $this->info;
+    }
+
+    public function getName()
+    {
+        $info = $this->getInfo();
+        if (isset($info['name'])) {
+            return $info['name'];
+        }
+        return basename($this->plugin_dir);
+    }
+
+    /**
+     * Get the PSR-4 autoload info from the composer.json if any.
+     *
+     * @return array
+     */
+    protected function getAutoloadInfo()
+    {
+        $info = $this->getInfo();
+        if (isset($info['autoload']['psr-4'])) {
+            $keys = array_keys($info['autoload']['psr-4']);
+            return [
+                'prefix' => reset($keys),
+                'dir' => reset($info['autoload']['psr-4'])
+            ];
+        }
+        return ['prefix' => '', 'dir' => 'src'];
+    }
+
+    /**
+     * Return the namespace for this plugin's commands and hooks.
+     *
+     * @return string
+     */
+    protected function getCommandNamespace()
+    {
+        $autoload = $this->getAutoloadInfo();
+        return $autoload['prefix'];
+    }
+
+    /**
+     * Check to see if the provided info object has autoload info
+     *
+     * @param type $info
+     * @return boolean
+     */
+    protected function hasAutoload($info)
+    {
+        return isset($info['autoload']) && isset($info['autoload']['psr-4']);
     }
 
     /**
@@ -74,7 +158,7 @@ class PluginInfo
             throw new TerminusException('No plugin directory was specified');
         }
         if (!file_exists($this->plugin_dir)) {
-            throw new TerminusException('The directory "{dir}" is does not exist', ['dir' => $this->plugin_dir]);
+            throw new TerminusException('The directory "{dir}" does not exist', ['dir' => $this->plugin_dir]);
         }
         if (!is_dir($this->plugin_dir)) {
             throw new TerminusException('The file "{dir}" is not a directory', ['dir' => $this->plugin_dir]);
@@ -85,7 +169,7 @@ class PluginInfo
 
         $composer_json = $this->plugin_dir . '/composer.json';
         if (!file_exists($composer_json)) {
-            throw new TerminusException('The file "{file}" is does not exist', ['file' => $composer_json]);
+            throw new TerminusException('The file "{file}" does not exist', ['file' => $composer_json]);
         }
         if (!is_readable($composer_json)) {
             throw new TerminusException('The file "{file}" is not readable', ['file' => $composer_json]);
@@ -109,12 +193,14 @@ class PluginInfo
             throw new TerminusException('The composer.json must contain a "compatible-version" field in "extras/terminus"');
         }
 
-        if (isset($info['autoload']) && isset($info['autoload']['psr-4'])) {
+        if ($this->hasAutoload($info)) {
             $namespaces = array_keys($info['autoload']['psr-4']);
             foreach ($namespaces as $namespace) {
                 if (substr($namespace, -1) != '\\') {
-                    $correctNamespace = $namespace . '\\';
-                    throw new TerminusException('The namespace "{namespace}" in the composer.json autoload psr-4 section must end with a namespace separator. Should be "{correct}"', ['namespace' => addslashes($namespace), 'correct' => addslashes($correctNamespace)]);
+                    throw new TerminusException(
+                        'The namespace "{namespace}" in the composer.json autoload psr-4 section must end with a namespace separator. Should be "{correct}"',
+                        ['namespace' => addslashes($namespace), 'correct' => addslashes($namespace . '\\'),]
+                    );
                 }
             }
         }
@@ -123,33 +209,12 @@ class PluginInfo
     }
 
     /**
-     * Get the compatible Terminus version.
-     *
-     * @return string A version constraint string defining what versions of Terminus this plugin works with.
+     * Check to see if this plugin uses autloading
+     * @return boolean
      */
-    public function getCompatibleTerminusVersion()
+    protected function usesAutoload()
     {
-        return $this->getInfo()['extra']['terminus']['compatible-version'];
-    }
-
-    public function getName()
-    {
-        $info = $this->getInfo();
-        if (isset($info['name'])) {
-            return $info['name'];
-        }
-        return basename($this->plugin_dir);
-    }
-
-    /**
-     * Return the namespace for this plugin's commands and hooks.
-     *
-     * @return string
-     */
-    protected function getCommandNamespace()
-    {
-        $autoload = $this->getAutoloadInfo();
-        return $autoload['prefix'];
+        return $this->hasAutoload($this->getInfo());
     }
 
     /**
@@ -161,23 +226,5 @@ class PluginInfo
     {
         $autoload = $this->getAutoloadInfo();
         return $this->plugin_dir . '/' . $autoload['dir'];
-    }
-
-    /**
-     * Get the PSR-4 autoload info from the composer.json if any.
-     *
-     * @return array
-     */
-    protected function getAutoloadInfo()
-    {
-        $info = $this->getInfo();
-        if (isset($info['autoload']['psr-4'])) {
-            $keys = array_keys($info['autoload']['psr-4']);
-            return [
-                'prefix' => reset($keys),
-                'dir' => reset($info['autoload']['psr-4'])
-            ];
-        }
-        return ['prefix' => '', 'dir' => 'src'];
     }
 }

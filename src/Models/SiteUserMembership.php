@@ -4,41 +4,22 @@ namespace Pantheon\Terminus\Models;
 
 use League\Container\ContainerAwareInterface;
 use League\Container\ContainerAwareTrait;
+use Pantheon\Terminus\Friends\SiteInterface;
+use Pantheon\Terminus\Friends\SiteTrait;
+use Pantheon\Terminus\Friends\UserJoinInterface;
+use Pantheon\Terminus\Friends\UserJoinTrait;
 
 /**
  * Class SiteUserMembership
  * @package Pantheon\Terminus\Models
  */
-class SiteUserMembership extends TerminusModel implements ContainerAwareInterface
+class SiteUserMembership extends TerminusModel implements ContainerAwareInterface, SiteInterface, UserJoinInterface
 {
     use ContainerAwareTrait;
+    use SiteTrait;
+    use UserJoinTrait;
 
-    /**
-     * @var Site
-     */
-    public $site;
-    /**
-     * @var User
-     */
-    public $user;
-    /**
-     * @var object
-     */
-    protected $user_data;
-
-    /**
-     * Object constructor
-     *
-     * @param object $attributes Attributes of this model
-     * @param array $options Options with which to configure this model
-     * @return SiteUserMembership
-     */
-    public function __construct($attributes = null, array $options = [])
-    {
-        parent::__construct($attributes, $options);
-        $this->site = $options['collection']->site;
-        $this->user_data = $attributes->user;
-    }
+    const PRETTY_NAME = 'site-user membership';
 
     /**
      * Remove membership, either org or user
@@ -54,31 +35,23 @@ class SiteUserMembership extends TerminusModel implements ContainerAwareInterfac
     }
 
     /**
-     * @return Site
+     * Determines whether this user is the owner of the site.
+     *
+     * @return bool
      */
-    public function getSite()
+    public function isOwner()
     {
-        return $this->site;
+        return $this->getUser()->id === $this->getSite()->get('owner');
     }
 
     /**
-     * Get the user for this membership
-     *
-     * @return User
+     * @inheritdoc
      */
-    public function getUser()
-    {
-        if (empty($this->user)) {
-            $this->user = $this->getContainer()->get(User::class, [$this->user_data]);
-            $this->user->memberships = [$this,];
-        }
-        return $this->user;
-    }
-
     public function serialize()
     {
         $user = $this->getUser()->serialize();
         return $user + [
+            'is_owner' => $this->isOwner(),
             'role'  => $this->get('role'),
         ];
     }

@@ -3,7 +3,6 @@
 ## Status
 [![Build Status](https://travis-ci.org/pantheon-systems/terminus.svg?branch=master)](https://travis-ci.org/pantheon-systems/terminus)
 [![Windows CI](https://ci.appveyor.com/api/projects/status/niiheng08p25mgnm?svg=true)](https://ci.appveyor.com/project/greg-1-anderson/terminus)
-[![Dependency Status](https://gemnasium.com/pantheon-systems/terminus.svg)](https://gemnasium.com/pantheon-systems/terminus)
 [![Coverage Status](https://coveralls.io/repos/github/pantheon-systems/terminus/badge.svg?branch=master)](https://coveralls.io/github/pantheon-systems/terminus?branch=master)
  
 ## About
@@ -11,11 +10,14 @@ Terminus is Pantheon's Command Line Interface (CLI), providing at least equivale
 browser-based Dashboard and easier scripting.
 
 If you would like to contribute, pull requests are welcome!
- 
+
+## The Manual
+Our documentation is kept in the Terminus Manual, located here: https://pantheon.io/docs/terminus
+
 ## Dependencies
 ### Required
 - A command-line client
-- PHP version 5.5.9 or later
+- PHP version 5.5.38 or later
 - [PHP-CLI](http://www.php-cli.com/)
 - [PHP-CURL](http://php.net/manual/en/curl.setup.php)
 
@@ -35,7 +37,7 @@ Run this in your Terminal client:
 ```bash
 curl -O https://raw.githubusercontent.com/pantheon-systems/terminus-installer/master/builds/installer.phar && php installer.phar install
 ```
-For more information on installation options, please see the [Terminus Installer README.md file](https://github.com/pantheon-systems/terminus-installer).
+For more information on installation options or to report an issue with this method, please see the [Terminus Installer README.md file](https://github.com/pantheon-systems/terminus-installer).
 
 ### Installing with Composer
 Run this in your terminal client:
@@ -48,26 +50,15 @@ composer remove pantheon-systems/terminus
 ```
 before requiring it.
 
-### Installing with [Homebrew](http://brew.sh/) (for Macs)
-This only installs stable versions of Terminus, and will install the latest 0.13.x release until 1.0 is out of beta.
-If you do not have `homebrew-php` already tapped, here are the commands for the taps:
-```bash
-brew tap homebrew/dupes ; brew tap homebrew/versions ; brew tap homebrew/php
-```
-And after you're all tapped out, install Terminus with this command:
-```bash
-brew install homebrew/php/terminus
-```
-
 ### Installing with Git
 To install with Git and use Terminus HEAD, you should clone this repository and run Terminus directly. If you would
 like to contribute to the Terminus source, this is the way you should install it. You will require Composer for this installation.
 
-1. Clone the repository. If you plan on contributing to the project, create a fork and clone the fork instead.
+- Clone the repository. If you plan on contributing to the project, create a fork and clone the fork instead:
 ```bash
 cd /install/location ; git clone https://github.com/pantheon-systems/terminus.git terminus
 ```
-2. Install the Composer dependencies.
+- Install the Composer dependencies:
 ```bash
 cd terminus ; composer install
 ```
@@ -77,7 +68,39 @@ You can now run the bleeding-edge version of Terminus via:
 bin/terminus
 ```
 
-**Optionally**, for ease of development, we suggest aliasing or setting the path bash configuration file, or
+## Updating
+### Updating via the Terminus installer
+Run this in your Terminal client:
+```bash
+curl -O https://raw.githubusercontent.com/pantheon-systems/terminus-installer/master/builds/installer.phar && php installer.phar update
+```
+For more information on update options or to report an issue with this method, please see the [Terminus Installer README.md file](https://github.com/pantheon-systems/terminus-installer).
+
+### Updating with Composer
+Run this in your terminal client:
+```bash
+cd /install/location ; composer update
+```
+
+### Updating with [Homebrew](http://brew.sh/) (for Macs)
+Update Terminus with this command:
+```bash
+brew upgrade homebrew/php/terminus
+```
+
+### Updating with Git
+To update with Git and use Terminus HEAD, you should update this repository and then update its dependencies via Composer.
+
+- Update the repository:
+```bash
+cd /install/location/terminus ; git pull
+```
+- Update the Composer dependencies:
+```bash
+composer update
+```
+
+**Optionally**, for ease of development we suggest aliasing, setting the PATH in the bash configuration file, or
 symlinking to it. This file is located at `~/.bashrc` on Linux systems and at `~/.bash_profile` on Mac.
 #### Alias
 ```bash
@@ -199,3 +222,14 @@ To deploy a new version of Terminus:
 - If you are getting `cURL error 60: SSL certificate problem: ...`, download a [cacert.pem](https://curl.haxx.se/ca/cacert.pem)
 file and add `curl.cainfo = "[path_to_file]\cacert.pem"` to your `php.ini`. If using XAMPP, you can add this to your
 `xampp\php\extras\ssl` directory.
+
+## Pull Request Guidelines
+- The code must be PSR-2 formatted.
+- The files must be appropriately namespaced so they are automatically found.
+- All new lines must be unit tested with PHPUnit. Ideally, all lines should be reached at least once while running the unit testing suite.
+- Functions should be as simple as possible so as to not require a great number of tests per function.
+- All reasonable states of any given command should have a Behat feature test. If fixing for a scenario not previously imagined or once considered unreasonable also test it.
+- Add changes to `CHANGELOG.md` and include the pull request number. (You will have to push a second time once you have one.)
+- All functions get comment markup consisting of at least all parameters, returned values, and exceptions thrown. An explanation should be included if it is not apparent.
+- Explain why you did what you did in the commit messages.
+- Pantheors: Add your Jira ticket number if it is available.

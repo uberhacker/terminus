@@ -11,10 +11,17 @@ use Pantheon\Terminus\Exceptions\TerminusException;
 class DefaultsConfig extends TerminusConfig
 {
     /**
+     * @var string
+     */
+    protected $source_name = 'Default';
+
+    /**
      * DefaultsConfig constructor.
      */
     public function __construct()
     {
+        parent::__construct();
+
         $this->set('root', $this->getTerminusRoot());
         $this->set('php', $this->getPhpBinary());
         $this->set('php_version', PHP_VERSION);
@@ -22,16 +29,6 @@ class DefaultsConfig extends TerminusConfig
         $this->set('script', $this->getTerminusScript());
         $this->set('os_version', php_uname('v'));
         $this->set('user_home', $this->getHomeDir());
-    }
-
-    /**
-     * Get the name of the source for this configuration object.
-     *
-     * @return string
-     */
-    public function getSourceName()
-    {
-        return 'Default';
     }
 
     /**
@@ -58,6 +55,10 @@ class DefaultsConfig extends TerminusConfig
         }
         if (file_exists($current_dir . DIRECTORY_SEPARATOR . 'composer.json')) {
             return $current_dir;
+        }
+        $pharPath = \Phar::running(true);
+        if ($pharPath) {
+            return $pharPath;
         }
         $dir = explode(DIRECTORY_SEPARATOR, $current_dir);
         array_pop($dir);

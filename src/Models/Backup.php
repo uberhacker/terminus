@@ -2,30 +2,24 @@
 
 namespace Pantheon\Terminus\Models;
 
-use Robo\Common\ConfigAwareTrait;
-use Robo\Contract\ConfigAwareInterface;
+use Pantheon\Terminus\Friends\EnvironmentInterface;
+use Pantheon\Terminus\Friends\EnvironmentTrait;
 use Pantheon\Terminus\Exceptions\TerminusException;
 
 /**
  * Class Backup
  * @package Pantheon\Terminus\Models
  */
-class Backup extends TerminusModel implements ConfigAwareInterface
+class Backup extends TerminusModel implements EnvironmentInterface
 {
-    use ConfigAwareTrait;
-    /**
-     * @var environment
-     */
-    public $environment;
+    use EnvironmentTrait;
+
+    const PRETTY_NAME = 'backup';
 
     /**
-     * @inheritdoc
+     * @var array
      */
-    public function __construct($attributes, array $options = [])
-    {
-        parent::__construct($attributes, $options);
-        $this->environment = $options['collection']->environment;
-    }
+    public static $date_attributes = ['date', 'expiry',];
 
     /**
      * Determines whether the backup has been completed or not
@@ -36,11 +30,32 @@ class Backup extends TerminusModel implements ConfigAwareInterface
     {
         return (
             ($this->get('size') != 0)
-            && (
-                ($this->get('finish_time') != null)
-                || ($this->get('timestamp') != null)
-            )
+            && ($this->has('finish_time') || $this->has('timestamp'))
         );
+    }
+
+    /**
+     * Gets the URL of a backup's archive
+     *
+     * @return string
+     */
+    public function getArchiveURL()
+    {
+        if (!$this->has('archive_url')) {
+            $env = $this->getEnvironment();
+            $path = sprintf(
+                'sites/%s/environments/%s/backups/catalog/%s/%s/s3token',
+                $env->getSite()->id,
+                $env->id,
+                $this->get('folder'),
+                $this->get('type')
+            );
+            // The API makes this is necessary.
+            $options = ['method' => 'post', 'form_params' => ['method' => 'get',],];
+            $response = $this->request()->request($path, $options);
+            $this->set('archive_url', $response['data']->url);
+        }
+        return $this->get('archive_url');
     }
 
     /**
@@ -64,14 +79,26 @@ class Backup extends TerminusModel implements ConfigAwareInterface
      */
     public function getDate()
     {
-        if (!is_null($this->get('finish_time'))) {
-            $datetime = $this->get('finish_time');
-        } elseif (!is_null($this->get('timestamp'))) {
-            $datetime = $this->get('timestamp');
-        } else {
-            return 'Pending';
+        if (!is_null($finish_time = $this->get('finish_time'))) {
+            return $finish_time;
         }
-        return date($this->getConfig()->get('date_format'), $datetime);
+        if (!is_null($timestamp = $this->get('timestamp'))) {
+            return $timestamp;
+        }
+        return 'Pending';
+    }
+
+    /**
+     * Returns the backup expiry datetime
+     *
+     * @return string Expiry datetime or null
+     */
+    public function getExpiry()
+    {
+        if (is_numeric($datetime = $this->getDate())) {
+            return $datetime + $this->get('ttl');
+        }
+        return null;
     }
 
     /**
@@ -83,6 +110,14 @@ class Backup extends TerminusModel implements ConfigAwareInterface
     {
         preg_match("/.*_(.*)/", $this->get('folder'), $automation_match);
         return (isset($automation_match[1]) && ($automation_match[1] == 'automated')) ? 'automated' : 'manual';
+    }
+
+    /**
+     * @return string[]
+     */
+    public function getReferences()
+    {
+        return [$this->id, $this->get('filename'),];
     }
 
     /**
@@ -102,25 +137,6 @@ class Backup extends TerminusModel implements ConfigAwareInterface
             }
         }
         return $size_string;
-    }
-
-    /**
-     * Gets the URL of a backup
-     *
-     * @return string
-     */
-    public function getUrl()
-    {
-        $path = sprintf(
-            'sites/%s/environments/%s/backups/catalog/%s/%s/s3token',
-            $this->environment->site->id,
-            $this->environment->id,
-            $this->get('folder'),
-            $this->get('type')
-        );
-        $options  = ['method' => 'post', 'form_params' => ['method' => 'get',],];
-        $response = $this->request()->request($path, $options);
-        return $response['data']->url;
     }
 
     /**
@@ -147,15 +163,13 @@ class Backup extends TerminusModel implements ConfigAwareInterface
                 break;
         }
         $modified_id = str_replace("_$type", '', $this->id);
-        $workflow = $this->environment->getWorkflows()->create(
-            $wf_name,
-            [
-                'params' => [
-                    'key' => "{$this->environment->site->id}/{$this->environment->id}/{$modified_id}/{$this->get('filename')}",
-                    'bucket' => $this->getBucket(),
-                ],
-            ]
-        );
+        $env = $this->getEnvironment();
+        $workflow = $env->getWorkflows()->create($wf_name, [
+            'params' => [
+                'key' => "{$env->getSite()->id}/{$env->id}/{$modified_id}/{$this->get('filename')}",
+                'bucket' => $this->getBucket(),
+            ],
+        ]);
         return $workflow;
     }
 
@@ -170,9 +184,22 @@ class Backup extends TerminusModel implements ConfigAwareInterface
             'file'      => $this->get('filename'),
             'size'      => $this->getSizeInMb(),
             'date'      => $this->getDate(),
+            'expiry'    => $this->getExpiry(),
             'initiator' => $this->getInitiator(),
+            'url'       => $this->get('archive_url'),
         ];
     }
+
+    /**
+     * Formats the object into an associative array for output
+     *
+     * @return array Associative array of data for output
+     */
+    public function serializeWithURL()
+    {
+        return array_merge($this->serialize(), ['url' => $this->getUrl()]);
+    }
+
 
     /**
      * @inheritdoc

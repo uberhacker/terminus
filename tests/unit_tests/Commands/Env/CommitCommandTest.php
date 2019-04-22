@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\UnitTests\Commands\Env;
 
 use Pantheon\Terminus\Commands\Env\CommitCommand;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class CommitCommandTest
@@ -11,6 +12,8 @@ use Pantheon\Terminus\Commands\Env\CommitCommand;
  */
 class CommitCommandTest extends EnvCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * Sets up the test fixture.
      */
@@ -18,9 +21,11 @@ class CommitCommandTest extends EnvCommandTest
     {
         parent::setUp();
         $this->command = new CommitCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSites($this->sites);
         $this->environment->id = 'dev';
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -31,47 +36,102 @@ class CommitCommandTest extends EnvCommandTest
         $message = 'Custom message.';
 
         $this->environment->expects($this->once())
-            ->method('diffstat')
-            ->willReturn(['a', 'b']);
+        ->method('diffstat')
+        ->willReturn(['a', 'b']);
         $this->environment->expects($this->once())
-            ->method('commitChanges')
-            ->with($this->equalTo($message))
-            ->willReturn($this->workflow);
-        $this->workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
+        ->method('get')
+        ->with('connection_mode')
+        ->willReturn('sftp');
+        $this->environment->expects($this->once())
+        ->method('commitChanges')
+        ->with($this->equalTo($message))
+        ->willReturn($this->workflow);
         $this->logger->expects($this->once())
-            ->method('log')
-            ->with(
-                $this->equalTo('notice'),
-                $this->equalTo('Your code was committed.')
-            );
+        ->method('log')
+        ->with(
+            $this->equalTo('notice'),
+            $this->equalTo('Your code was committed.')
+        );
 
-        $out = $this->command->commit('mysite.' . $this->environment->id, compact('message'));
+        $out = $this->command->commit(
+            'mysite.' . $this->environment->id,
+            compact('message')
+        );
         $this->assertNull($out);
     }
 
-    /**
-     * Tests the env:commit command when there are no changes to be committed
-     */
+  /**
+   * Tests the env:commit command when there are no changes to be committed
+   */
     public function testCommitNoChanges()
     {
         $this->environment->expects($this->once())
-            ->method('diffstat')
-            ->willReturn([]);
+        ->method('diffstat')
+        ->willReturn([]);
         $this->environment->expects($this->never())
-            ->method('commitChanges');
-        $this->workflow->expects($this->never())
-            ->method('checkProgress');
+        ->method('commitChanges');
         $this->logger->expects($this->once())
-            ->method('log')
-            ->with(
-                $this->equalTo('warning'),
-                $this->equalTo('There is no code to commit.')
-            );
+        ->method('log')
+        ->with(
+            $this->equalTo('warning'),
+            $this->equalTo('There is no code to commit.')
+        );
 
         $out = $this->command->commit('mysite.' . $this->environment->id);
+        $this->assertNull($out);
+    }
+
+  /**
+   * Tests the env:commit command when there are no changes to be committed
+   */
+    public function testCommitForce()
+    {
+        $message = 'Custom message.';
+
+        $this->environment->expects($this->once())
+        ->method('get')
+        ->with('connection_mode')
+        ->willReturn('sftp');
+        $this->environment->expects($this->once())
+        ->method('commitChanges')
+        ->with($this->equalTo($message))
+        ->willReturn($this->workflow);
+        $this->logger->expects($this->once())
+        ->method('log')
+        ->with(
+            $this->equalTo('notice'),
+            $this->equalTo('Your code was committed.')
+        );
+
+        $out = $this->command->commit(
+            'mysite.' . $this->environment->id,
+            ['message' => $message, 'force' => true]
+        );
+        $this->assertNull($out);
+    }
+
+  /**
+   * Tests the env:commit command when there are no changes to be committed
+   */
+    public function testCommitForceGitMode()
+    {
+        $this->environment->expects($this->once())
+        ->method('get')
+        ->with('connection_mode')
+        ->willReturn('git');
+        $this->environment->expects($this->never())
+        ->method('commitChanges');
+        $this->logger->expects($this->once())
+        ->method('log')
+        ->with(
+            $this->equalTo('warning'),
+            $this->equalTo('You can only commit code in an environment that is set to sftp mode.')
+        );
+
+        $out = $this->command->commit(
+            'mysite.' . $this->environment->id,
+            ['force' => true]
+        );
         $this->assertNull($out);
     }
 }

@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\Commands\Org\People;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 
 /**
  * Class RemoveCommand
@@ -10,6 +11,8 @@ use Pantheon\Terminus\Commands\TerminusCommand;
  */
 class RemoveCommand extends TerminusCommand
 {
+    use WorkflowProcessingTrait;
+
     /**
      * Removes a user from an organization.
      *
@@ -18,22 +21,19 @@ class RemoveCommand extends TerminusCommand
      * @command org:people:remove
      * @aliases org:people:rm org:ppl:remove org:ppl:rm
      *
-     * @param string $organization Organization name or ID
+     * @param string $organization Organization name, label, or ID
      * @param string $member User UUID, email address, or full name
      *
      * @usage <organization> <user> Removes the user, <user>, from <organization>.
      */
     public function remove($organization, $member)
     {
-        $org = $this->session()->getUser()->getOrgMemberships()->get($organization)->getOrganization();
+        $org = $this->session()->getUser()->getOrganizationMemberships()->get($organization)->getOrganization();
         $membership = $org->getUserMemberships()->fetch()->get($member);
-        $workflow = $membership->delete();
-        while (!$workflow->checkProgress()) {
-            // @TODO: Remove Symfony progress bar to indicate that something is happening.
-        }
+        $this->processWorkflow($membership->delete());
         $this->log()->notice(
             '{member} has been removed from the {org} organization.',
-            ['member' => $membership->getUser()->get('profile')->full_name, 'org' => $org->get('profile')->name,]
+            ['member' => $membership->getUser()->getName(), 'org' => $org->getName(),]
         );
     }
 }

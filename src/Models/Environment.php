@@ -8,72 +8,60 @@ use Pantheon\Terminus\Collections\Backups;
 use Pantheon\Terminus\Collections\Bindings;
 use Pantheon\Terminus\Collections\Commits;
 use Pantheon\Terminus\Collections\Domains;
-use Pantheon\Terminus\Collections\Loadbalancers;
+use Pantheon\Terminus\Collections\EnvironmentMetrics;
 use Pantheon\Terminus\Collections\Workflows;
 use Pantheon\Terminus\Helpers\LocalMachineHelper;
-use Robo\Common\ConfigAwareTrait;
-use Robo\Contract\ConfigAwareInterface;
+use Pantheon\Terminus\Friends\SiteInterface;
+use Pantheon\Terminus\Friends\SiteTrait;
 use Pantheon\Terminus\Exceptions\TerminusException;
-use Symfony\Component\Process\ProcessUtils;
 
 /**
  * Class Environment
  * @package Pantheon\Terminus\Models
  */
-class Environment extends TerminusModel implements ConfigAwareInterface, ContainerAwareInterface
+class Environment extends TerminusModel implements ContainerAwareInterface, SiteInterface
 {
     use ContainerAwareTrait;
-    use ConfigAwareTrait;
+    use SiteTrait;
 
+    const PRETTY_NAME = 'environment';
+
+    /**
+     * @var array
+     */
+    public static $date_attributes = ['created',];
+    /**
+     * @var string
+     */
+    protected $url = 'sites/{site_id}/environments/{id}';
     /**
      * @var Backups
      */
-    public $backups;
+    private $backups;
     /**
      * @var Bindings
      */
-    public $bindings;
+    private $bindings;
     /**
      * @var Commits
      */
-    public $commits;
+    private $commits;
     /**
      * @var Domains
      */
-    public $domains;
-    /**
-     * @var Loadbalancers
-     */
-    public $loadbalancers;
+    private $domains;
     /**
      * @var Lock
      */
-    protected $lock;
-    /**
-     * @var Site
-     */
-    public $site;
+    private $lock;
     /**
      * @var UpstreamStatus
      */
-    public $upstream_status;
+    private $upstream_status;
     /**
      * @var Workflows
      */
-    public $workflows;
-
-    /**
-     * Object constructor
-     *
-     * @param object $attributes Attributes of this model
-     * @param array $options Options with which to configure this model
-     */
-    public function __construct($attributes, array $options = [])
-    {
-        $this->site = $options['collection']->getSite();
-        parent::__construct($attributes, $options);
-        $this->url = "sites/{$this->getSite()->id}/environments/{$this->id}";
-    }
+    private $workflows;
 
     /**
      * Apply upstream updates
@@ -102,13 +90,13 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
             } while (!is_null($cache_binding) && $cache_binding->get('environment') != $this->id);
 
             $password = $cache_binding->get('password');
-            $hostname = $cache_binding->get('host');
+            $domain = $cache_binding->get('host');
             $port = $cache_binding->get('port');
-            $url = "redis://pantheon:$password@$hostname:$port";
-            $command = "redis-cli -h $hostname -p $port -a $password";
+            $url = "redis://pantheon:$password@$domain:$port";
+            $command = "redis-cli -h $domain -p $port -a $password";
             return [
                 'password' => $password,
-                'host' => $hostname,
+                'host' => $domain,
                 'port' => $port,
                 'url' => $url,
                 'command' => $command,
@@ -121,22 +109,26 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
      * Changes connection mode
      *
      * @param string $value Connection mode, "git" or "sftp"
-     * @return Workflow|string
+     * @return Workflow
+     * @throws TerminusException Thrown when the requested or the mode is already set or is not either "git" or "sftp".
      */
-    public function changeConnectionMode($value)
+    public function changeConnectionMode($mode)
     {
-        $current_mode = $this->serialize()['connection_mode'];
-        if ($value == $current_mode) {
-            $reply = "The connection mode is already set to $value.";
-            return $reply;
+        if ($mode === $this->get('connection_mode')) {
+            throw new TerminusException(
+                'The connection mode is already set to {mode}.',
+                compact('mode')
+            );
         }
-        switch ($value) {
+        switch ($mode) {
             case 'git':
                 $workflow_name = 'enable_git_mode';
                 break;
             case 'sftp':
                 $workflow_name = 'enable_on_server_development';
                 break;
+            default:
+                throw new TerminusException('You must specify the mode as either sftp or git.');
         }
 
         return $this->getWorkflows()->create($workflow_name);
@@ -155,24 +147,30 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     /**
      * Clones database from this environment to another
      *
-     * @param string $from_env Name of the environment to clone
+     * @param Environment $from_env An object representing the environment to clone
+     * @param array $options Options to be sent to the API
+     *    boolean clear_cache Whether or not to clear caches
+     *    boolean updatedb Update the Drupal database
      * @return Workflow
      */
-    public function cloneDatabase($from_env)
+    public function cloneDatabase(Environment $from_env, array $options = [])
     {
-        $params = ['from_environment' => $from_env,];
+        if (isset($options['updatedb'])) {
+            $options['updatedb'] = (integer)$options['updatedb'];
+        }
+        $params = array_merge(['from_environment' => $from_env->getName(),], $options);
         return $this->getWorkflows()->create('clone_database', compact('params'));
     }
 
     /**
      * Clones files from this environment to another
      *
-     * @param string $from_env Name of the environment to clone
+     * @param Environment $from_env An object representing the environment to clone
      * @return Workflow
      */
-    public function cloneFiles($from_env)
+    public function cloneFiles(Environment $from_env)
     {
-        $params = ['from_environment' => $from_env,];
+        $params = ['from_environment' => $from_env->getName(),];
         return $this->getWorkflows()->create('clone_files', compact('params'));
     }
 
@@ -302,13 +300,13 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
 
             $username = 'pantheon';
             $password = $db_binding->get('password');
-            $hostname = "dbserver.{$this->id}.{$this->getSite()->id}.drush.in";
+            $domain = "dbserver.{$this->id}.{$this->getSite()->id}.drush.in";
             $port = $db_binding->get('port');
             $database = 'pantheon';
-            $url = "mysql://$username:$password@$hostname:$port/$database";
-            $command = "mysql -u $username -p$password -h $hostname -P $port $database";
+            $url = "mysql://$username:$password@$domain:$port/$database";
+            $command = "mysql -u $username -p$password -h $domain -P $port $database";
             return [
-                'host' => $hostname,
+                'host' => $domain,
                 'username' => $username,
                 'password' => $password,
                 'port' => $port,
@@ -379,7 +377,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function disableHttpsCertificate()
     {
         if (!$this->settings('ssl_enabled')) {
-            throw new TerminusException('The {env} environment does not have https enabled.', ['env' => $this->id]);
+            throw new TerminusException('The {env} environment does not have https enabled.', ['env' => $this->id,]);
         }
         try {
             $this->request()->request(
@@ -414,7 +412,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getBackups()
     {
         if (empty($this->backups)) {
-            $this->backups = $this->getContainer()->get(Backups::class, [['environment' => $this,]]);
+            $this->backups = $this->getContainer()->get(Backups::class, [['environment' => $this,],]);
         }
         return $this->backups;
     }
@@ -425,7 +423,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getBindings()
     {
         if (empty($this->bindings)) {
-            $this->bindings = $this->getContainer()->get(Bindings::class, [['environment' => $this,]]);
+            $this->bindings = $this->getContainer()->get(Bindings::class, [['environment' => $this,],]);
         }
         return $this->bindings;
     }
@@ -444,9 +442,20 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getCommits()
     {
         if (empty($this->commits)) {
-            $this->commits = $this->getContainer()->get(Commits::class, [['environment' => $this,]]);
+            $this->commits = $this->getContainer()->get(Commits::class, [['environment' => $this,],]);
         }
         return $this->commits;
+    }
+
+    /**
+     * @return EnvironmentMetrics
+     */
+    public function getEnvironmentMetrics()
+    {
+        if (empty($this->environment_metrics)) {
+            $this->environment_metrics = $this->getContainer()->get(EnvironmentMetrics::class, [['environment' => $this,],]);
+        }
+        return $this->environment_metrics;
     }
 
     /**
@@ -455,7 +464,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getDomains()
     {
         if (empty($this->domains)) {
-            $this->domains = $this->getContainer()->get(Domains::class, [['environment' => $this,]]);
+            $this->domains = $this->getContainer()->get(Domains::class, [['environment' => $this,],]);
         }
         return $this->domains;
     }
@@ -471,17 +480,6 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     }
 
     /**
-     * @return Loadbalancers
-     */
-    public function getLoadbalancers()
-    {
-        if (empty($this->workflows)) {
-            $this->workflows = $this->getContainer()->get(Loadbalancers::class, [['environment' => $this,]]);
-        }
-        return $this->workflows;
-    }
-
-    /**
      * Returns the lock object associated with this environment
      *
      * @return Lock
@@ -489,7 +487,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getLock()
     {
         if (empty($this->lock)) {
-            $this->lock = $this->getContainer()->get(Lock::class, [$this->get('lock'), ['environment' => $this]]);
+            $this->lock = $this->getContainer()->get(Lock::class, [$this->get('lock'), ['environment' => $this],]);
         }
         return $this->lock;
     }
@@ -536,20 +534,12 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     }
 
     /**
-     * @return Site
-     */
-    public function getSite()
-    {
-        return $this->site;
-    }
-
-    /**
      * @return UpstreamStatus
      */
     public function getUpstreamStatus()
     {
         if (empty($this->upstream_status)) {
-            $this->upstream_status = $this->getContainer()->get(UpstreamStatus::class, [[], ['environment' => $this,]]);
+            $this->upstream_status = $this->getContainer()->get(UpstreamStatus::class, [[], ['environment' => $this,],]);
         }
         return $this->upstream_status;
     }
@@ -560,7 +550,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     public function getWorkflows()
     {
         if (empty($this->workflows)) {
-            $this->workflows = $this->getContainer()->get(Workflows::class, [['environment' => $this,]]);
+            $this->workflows = $this->getContainer()->get(Workflows::class, [['environment' => $this,],]);
         }
         return $this->workflows;
     }
@@ -574,13 +564,13 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     {
         $site = $this->getSite();
         $username = "codeserver.dev.{$site->id}";
-        $hostname = "codeserver.dev.{$site->id}.drush.in";
+        $domain = "codeserver.dev.{$site->id}.drush.in";
         $port = '2222';
-        $url = "ssh://$username@$hostname:$port/~/repository.git";
+        $url = "ssh://$username@$domain:$port/~/repository.git";
         $command = trim("git clone $url {$site->get('name')}");
         return [
             'username' => $username,
-            'host' => $hostname,
+            'host' => $domain,
             'port' => $port,
             'url' => $url,
             'command' => $command,
@@ -598,6 +588,16 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     }
 
     /**
+     * Determines whether there is uncommitted code on the environment.
+     *
+     * @return bool
+     */
+    public function hasUncommittedChanges()
+    {
+        return ($this->get('connection_mode') === 'sftp') && (count((array)$this->get('diffstat')) !== 0);
+    }
+
+    /**
      * Imports a database archive
      *
      * @param string $url URL to import data from
@@ -605,7 +605,15 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
      */
     public function importDatabase($url)
     {
-        return $this->getWorkflows()->create('import_database', ['params' => compact('url'),]);
+        return $this->getWorkflows()->create(
+            'do_import',
+            [
+                'params' => [
+                    'database' => 1,
+                    'url' => $url,
+                ],
+            ]
+        );
     }
 
     /**
@@ -631,7 +639,15 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
      */
     public function importFiles($url)
     {
-        return $this->getWorkflows()->create('import_files', ['params' => compact('url'),]);
+        return $this->getWorkflows()->create(
+            'do_import',
+            [
+                'params' => [
+                    'files' => 1,
+                    'url' => $url,
+                ],
+            ]
+        );
     }
 
     /**
@@ -639,9 +655,11 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
      * content from previous environment (e.g. test clones dev content, live
      * clones test content.)
      *
+     * @param array $params Parameters for the environment-creation workflow
+     *      string annotation Use to overwrite the default deploy message
      * @return Workflow In-progress workflow
      */
-    public function initializeBindings()
+    public function initializeBindings(array $params = [])
     {
         if ($this->id == 'test') {
             $from_env_id = 'dev';
@@ -649,13 +667,26 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
             $from_env_id = 'test';
         }
 
-        $params = [
-            'annotation' => "Create the {$this->id} environment",
-            'clone_database' => ['from_environment' => $from_env_id,],
-            'clone_files' => ['from_environment' => $from_env_id,],
-        ];
+        $parameters = array_merge(
+            [
+                'annotation' => "Create the {$this->id} environment",
+                'clone_database' => ['from_environment' => $from_env_id,],
+                'clone_files' => ['from_environment' => $from_env_id,],
+            ],
+            $params
+        );
 
-        return $this->getWorkflows()->create('create_environment', compact('params'));
+        return $this->getWorkflows()->create('create_environment', ['params' => $parameters,]);
+    }
+
+    /**
+     * Is this branch a development environment?
+     *
+     * @return bool True if ths environment is a development environment
+     */
+    public function isDevelopment()
+    {
+        return !in_array($this->id, ['test', 'live',]);
     }
 
     /**
@@ -682,7 +713,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
      */
     public function isMultidev()
     {
-        return !in_array($this->id, ['dev', 'test', 'live']);
+        return !in_array($this->id, ['dev', 'test', 'live',]);
     }
 
     /**
@@ -729,36 +760,6 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     }
 
     /**
-     * Sends a command to an environment via SSH.
-     *
-     * @param string $command The command to be run on the platform
-     * @param callable $callback An anonymous function to run while waiting for the command to finish
-     * @return string[] $response Elements as follow:
-     *         string output    The output from the command run
-     *         string exit_code The status code returned by the command run
-     */
-    public function sendCommandViaSsh($command, $callback = null)
-    {
-        $sftp = $this->sftpConnectionInfo();
-        $ssh_command = vsprintf(
-            'ssh -T %s@%s -p %s -o "AddressFamily inet" %s',
-            [$sftp['username'], $sftp['host'], $sftp['port'], ProcessUtils::escapeArgument($command),]
-        );
-
-        // Catch Terminus running in test mode
-        if ($this->getConfig()->get('test_mode')) {
-            return [
-                'output' => "Terminus is in test mode. "
-                    . "Environment::sendCommandViaSsh commands will not be sent over the wire. "
-                    . "SSH Command: ${ssh_command}",
-                'exit_code' => 0
-            ];
-        }
-
-        return $this->getContainer()->get(LocalMachineHelper::class)->execInteractive($ssh_command, $callback);
-    }
-
-    /**
      * Formats environment object into an associative array for output
      *
      * @return array Associative array of data for output
@@ -767,11 +768,11 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
     {
         return [
             'id' => $this->id,
-            'created' => date($this->getConfig()->get('date_format'), $this->get('environment_created')),
+            'created' => $this->get('environment_created'),
             'domain' => $this->domain(),
-            'onserverdev' => $this->get('on_server_development') ? 'true' : 'false',
-            'locked' => $this->getLock()->isLocked() ? 'true' : 'false',
-            'initialized' => $this->isInitialized() ? 'true' : 'false',
+            'onserverdev' => $this->get('on_server_development'),
+            'locked' => $this->getLock()->isLocked(),
+            'initialized' => $this->isInitialized(),
             'connection_mode' => $this->get('connection_mode'),
             'php_version' => $this->getPHPVersion(),
         ];
@@ -795,7 +796,7 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
         );
 
         // The response is actually a workflow
-        return $this->getContainer()->get(Workflow::class, [$response['data'], ['environment' => $this,]]);
+        return $this->getContainer()->get(Workflow::class, [$response['data'], ['environment' => $this,],]);
     }
 
     /**
@@ -808,21 +809,21 @@ class Environment extends TerminusModel implements ConfigAwareInterface, Contain
         $site = $this->getSite();
         if (!empty($ssh_host = $this->getConfig()->get('ssh_host'))) {
             $username = "appserver.{$this->id}.{$site->id}";
-            $hostname = $ssh_host;
+            $domain = $ssh_host;
         } elseif (strpos($this->getConfig()->get('host'), 'onebox') !== false) {
             $username = "appserver.{$this->id}.{$site->id}";
-            $hostname = $this->getConfig()->get('host');
+            $domain = $this->getConfig()->get('host');
         } else {
             $username = "{$this->id}.{$site->id}";
-            $hostname = "appserver.{$this->id}.{$site->id}.drush.in";
+            $domain = "appserver.{$this->id}.{$site->id}.drush.in";
         }
         $password = 'Use your account password';
         $port = '2222';
-        $url = "sftp://$username@$hostname:$port";
-        $command = "sftp -o Port=$port $username@$hostname";
+        $url = "sftp://$username@$domain:$port";
+        $command = "sftp -o Port=$port $username@$domain";
         return [
             'username' => $username,
-            'host' => $hostname,
+            'host' => $domain,
             'port' => $port,
             'password' => $password,
             'url' => $url,

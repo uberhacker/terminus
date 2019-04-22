@@ -2,29 +2,39 @@
 
 namespace Pantheon\Terminus\Models;
 
+use Pantheon\Terminus\Collections\TerminusCollection;
+use Pantheon\Terminus\Config\ConfigAwareTrait;
 use Pantheon\Terminus\Request\RequestAwareInterface;
 use Pantheon\Terminus\Request\RequestAwareTrait;
+use Robo\Contract\ConfigAwareInterface;
 
 /**
  * Class TerminusModel
  * @package Pantheon\Terminus\Models
  */
-abstract class TerminusModel implements RequestAwareInterface
+abstract class TerminusModel implements ConfigAwareInterface, RequestAwareInterface
 {
+    use ConfigAwareTrait;
     use RequestAwareTrait;
 
+    const PRETTY_NAME = 'terminus model';
+
+    /**
+     * @var array
+     */
+    public static $date_attributes = [];
     /**
      * @var string
      */
     public $id;
     /**
-     * @var array Arguments for fetching this model's information
-     */
-    protected $args = [];
-    /**
      * @var object
      */
     protected $attributes;
+    /**
+     * @var TerminusCollection
+     */
+    protected $collection;
     /**
      * @var string The URL at which to fetch this model's information
      */
@@ -38,6 +48,9 @@ abstract class TerminusModel implements RequestAwareInterface
      */
     public function __construct($attributes = null, array $options = [])
     {
+        if (isset($options['collection'])) {
+            $this->collection = $options['collection'];
+        }
         if (is_object($attributes)) {
             $this->attributes = $this->parseAttributes($attributes);
             if (isset($this->attributes->id)) {
@@ -56,11 +69,7 @@ abstract class TerminusModel implements RequestAwareInterface
      */
     public function fetch(array $args = [])
     {
-        $options = array_merge(
-            ['options' => ['method' => 'get',],],
-            $this->args,
-            $args
-        );
+        $options = array_merge(['options' => ['method' => 'get',],], $args);
         $results = $this->request->request($this->getUrl(), $options);
         $this->attributes = (object)array_merge(
             (array)$this->attributes,
@@ -77,10 +86,27 @@ abstract class TerminusModel implements RequestAwareInterface
      */
     public function get($attribute)
     {
-        if ($this->has($attribute)) {
-            return $this->attributes->$attribute;
-        }
-        return null;
+        return $this->has($attribute) ? $this->attributes->$attribute : null;
+    }
+
+    /**
+     * Returns the fields by which this model can be found.
+     *
+     * @return array
+     */
+    public function getReferences()
+    {
+        return [$this->id,];
+    }
+
+    /**
+     * Get the URL for this model
+     *
+     * @return string
+     */
+    public function getUrl()
+    {
+        return str_replace('{id}', $this->id, $this->url);
     }
 
     /**
@@ -95,6 +121,16 @@ abstract class TerminusModel implements RequestAwareInterface
     }
 
     /**
+     * Formats the object into an associative array for output
+     *
+     * @return array Associative array of data for output
+     */
+    public function serialize()
+    {
+        return (array)$this->attributes;
+    }
+
+    /**
      * Sets an attribute
      *
      * @param string $attribute Name of the attribute key
@@ -106,6 +142,16 @@ abstract class TerminusModel implements RequestAwareInterface
     }
 
     /**
+     * Unsets an attribute
+     *
+     * @param string $attribute Name of the attribute key
+     */
+    public function unsetAttribute($attribute)
+    {
+        unset($this->attributes->$attribute);
+    }
+
+    /**
      * Modify response data between fetch and assignment
      *
      * @param object $data attributes received from API response
@@ -114,25 +160,5 @@ abstract class TerminusModel implements RequestAwareInterface
     protected function parseAttributes($data)
     {
         return $data;
-    }
-
-    /**
-     * Get the URL for this model
-     *
-     * @return string
-     */
-    public function getUrl()
-    {
-        return $this->url;
-    }
-
-    /**
-     * Formats the object into an associative array for output
-     *
-     * @return array Associative array of data for output
-     */
-    public function serialize()
-    {
-        return (array)$this->attributes;
     }
 }

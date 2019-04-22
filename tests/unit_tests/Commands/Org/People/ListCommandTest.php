@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\UnitTests\Commands\Org\People;
 
 use Pantheon\Terminus\Commands\Org\People\ListCommand;
+use Pantheon\Terminus\Models\UserOrganizationMembership;
 
 /**
  * Class ListCommandTest
@@ -17,6 +18,7 @@ class ListCommandTest extends OrgPeopleCommandTest
     protected function setUp()
     {
         parent::setUp();
+        $this->org_user_memberships->method('getCollectedClass')->willReturn(UserOrganizationMembership::class);
 
         $this->command = new ListCommand($this->getConfig());
         $this->command->setLogger($this->logger);
@@ -34,14 +36,14 @@ class ListCommandTest extends OrgPeopleCommandTest
             ->with()
             ->willReturn([]);
         $this->organization->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)['name' => $org_name,]);
+            ->method('getName')
+            ->with()
+            ->willReturn($org_name);
 
         $this->logger->expects($this->once())
             ->method('log')
             ->with(
-                $this->equalTo('notice'),
+                $this->equalTo('warning'),
                 $this->equalTo('{org} has no members.'),
                 $this->equalTo(['org' => $org_name,])
             );

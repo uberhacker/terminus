@@ -6,6 +6,7 @@ use Pantheon\Terminus\Collections\OrganizationSiteMemberships;
 use Pantheon\Terminus\Commands\Org\Site\RemoveCommand;
 use Pantheon\Terminus\Models\OrganizationSiteMembership;
 use Pantheon\Terminus\Models\Workflow;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class RemoveCommandTest
@@ -14,6 +15,8 @@ use Pantheon\Terminus\Models\Workflow;
  */
 class RemoveCommandTest extends OrgSiteCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * @var OrganizationSiteMembership
      */
@@ -39,7 +42,7 @@ class RemoveCommandTest extends OrgSiteCommandTest
         $this->org_site_membership = $this->getMockBuilder(OrganizationSiteMembership::class)
             ->disableOriginalConstructor()
             ->getMock();
-        $this->org_site_membership->site = $this->site;
+        $this->org_site_membership->method('getSite')->willReturn($this->site);
         $this->org_site_memberships = $this->getMockBuilder(OrganizationSiteMemberships::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -51,9 +54,11 @@ class RemoveCommandTest extends OrgSiteCommandTest
             ->willReturn($this->org_site_memberships);
 
         $this->command = new RemoveCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setSites($this->sites);
         $this->command->setLogger($this->logger);
         $this->command->setSession($this->session);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -61,7 +66,7 @@ class RemoveCommandTest extends OrgSiteCommandTest
      */
     public function testRemove()
     {
-        $org_name = 'Organization Name';
+        $org_name = 'organization-name';
         $site_name = 'Site Name';
 
         $this->workflow = $this->getMockBuilder(Workflow::class)
@@ -71,17 +76,14 @@ class RemoveCommandTest extends OrgSiteCommandTest
             ->method('delete')
             ->with()
             ->willReturn($this->workflow);
-        $this->workflow->expects($this->once())
-            ->method('checkProgress')
-            ->willReturn(true);
         $this->site->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('name'))
+            ->method('getName')
+            ->with()
             ->willReturn($site_name);
         $this->organization->expects($this->once())
-            ->method('get')
-            ->with($this->equalTo('profile'))
-            ->willReturn((object)['name' => $org_name,]);
+            ->method('getName')
+            ->with()
+            ->willReturn($org_name);
 
         $this->logger->expects($this->once())
             ->method('log')

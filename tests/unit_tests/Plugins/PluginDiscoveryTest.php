@@ -40,56 +40,84 @@ class PluginDiscoveryTest extends \PHPUnit_Framework_TestCase
         $this->logger = $this->getMockBuilder(NullLogger::class)
             ->setMethods(['warning',])
             ->getMock();
-        $this->plugins_dir = __DIR__ . '/../../fixtures/plugins/';
+        $this->plugins_dir = dirname(dirname(__DIR__)) . '/fixtures/plugins/';
 
         $this->discovery = new PluginDiscovery($this->plugins_dir);
-        $this->discovery->setContainer($this->container);
         $this->discovery->setLogger($this->logger);
     }
 
+    /**
+     * Tests the PluginDiscovery::discover() function
+     */
     public function testDiscover()
     {
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             $this->markTestIncomplete("Plugins not supported on Windows yet.");
         }
 
-
-        $paths = [
-            $this->plugins_dir  . 'invalid-no-composer-json',
-            $this->plugins_dir  . 'invalid-wrong-composer-type',
-            $this->plugins_dir  . 'with-namespace',
-            $this->plugins_dir  . 'without-namespace',
+        $invalid_paths = [
+            'invalid-compat-versionless-composer' => 'The composer.json must contain a "compatible-version" field in "extras/terminus"',
+            'invalid-composer-json' => 'The file "{path}/composer.json" does not contain valid JSON',
+            'invalid-composer-namespace' => 'The namespace "{namespace}" in the composer.json autoload psr-4 section must end with a namespace separator. Should be "{correct}"',
+            'invalid-extraless-composer' => 'The composer.json must contain a "terminus" section in "extras"',
+            'invalid-no-composer-json' => 'The file "{path}/composer.json" does not exist',
+            'invalid-wrong-composer-type' => 'The composer.json must contain a "type" attribute with the value "terminus-plugin"',
+        ];
+        $valid_paths = [
+            'without-namespace',
+            'with-namespace',
         ];
 
-        $expected = [];
         $log = 0;
-        foreach ($paths as $i => $path) {
-            if (strpos($path, 'invalid')) {
-                $msg = "Plugin $i is not valid";
-                $this->container->expects($this->at($i))
-                    ->method('get')
-                    ->with(PluginInfo::class, [$path])
-                    ->willThrowException(new TerminusException($msg));
-
-                $this->logger->expects($this->at($log++))
-                    ->method('warning')
-                    ->with(
-                        'Plugin Discovery: Ignoring directory {dir} because: {msg}.',
-                        ['dir' => $path, 'msg' => $msg,]
-                    );
-            } else {
-                $plugin = $this->getMockBuilder(PluginInfo::class)
-                    ->disableOriginalConstructor()
-                    ->getMock();
-                $this->container->expects($this->at($i))
-                    ->method('get')
-                    ->with(PluginInfo::class, [$path])
-                    ->willReturn($plugin);
-                $expected[] = $plugin;
-            }
+        foreach ($invalid_paths as $path => $msg) {
+            $path = $this->plugins_dir . $path;
+            $this->logger->expects($this->at($log++))
+                ->method('warning')
+                ->with('Plugin Discovery: Ignoring directory {dir} because: {msg}.');
         }
 
-        $actual = $this->discovery->discover();
-        $this->assertEquals($expected, $actual);
+        $pluginList = $this->discovery->discover();
+        $actual = $this->composeActualCommandFileDirectories($pluginList);
+        $expected = $this->composeExpectedCommandFileDirectories($valid_paths, $this->plugins_dir);
+        $reverse_expected = $this->composeExpectedCommandFileDirectories($valid_paths, $this->plugins_dir, true);
+        $this->assertTrue(($expected == $actual) || ($reverse_expected == $actual));
+    }
+
+    public function testDiscoverFailDirDNE()
+    {
+        $discovery = new PluginDiscovery(null);
+        $this->assertEmpty($discovery->discover());
+    }
+
+    protected function composeActualCommandFileDirectories($pluginList)
+    {
+        $dirList = [];
+        foreach ($pluginList as $plugin) {
+            $commandFileDirectory = $this->callProtected($plugin, 'getCommandFileDirectory');
+            $dirList[] = $commandFileDirectory;
+        }
+        $actual = implode(',', $dirList);
+        return $actual;
+    }
+
+    protected function composeExpectedCommandFileDirectories($valid_paths, $dir, $reverse = false)
+    {
+        $array = array_map(
+            function ($item) use ($dir) {
+                return "$dir$item/src";
+            },
+            $valid_paths
+        );
+        if ($reverse) {
+            $array = array_reverse($array);
+        }
+        return implode(',', $array);
+    }
+
+    protected function callProtected($object, $method, $args = [])
+    {
+        $r = new \ReflectionMethod($object, $method);
+        $r->setAccessible(true);
+        return $r->invokeArgs($object, $args);
     }
 }

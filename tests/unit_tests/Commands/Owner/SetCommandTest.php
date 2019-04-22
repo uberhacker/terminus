@@ -9,6 +9,7 @@ use Pantheon\Terminus\Collections\SiteUserMemberships;
 use Pantheon\Terminus\Exceptions\TerminusNotFoundException;
 use Pantheon\Terminus\Models\SiteUserMembership;
 use Pantheon\Terminus\Models\Workflow;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class SetCommandTest
@@ -17,6 +18,8 @@ use Pantheon\Terminus\Models\Workflow;
  */
 class SetCommandTest extends CommandTestCase
 {
+    use WorkflowProgressTrait;
+
     /**
      * @var SiteUserMemberships
      */
@@ -36,8 +39,10 @@ class SetCommandTest extends CommandTestCase
         $this->site->method('getUserMemberships')->willReturn($this->user_memberships);
 
         $this->command = new SetCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setSites($this->sites);
         $this->command->setLogger($this->logger);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -70,11 +75,6 @@ class SetCommandTest extends CommandTestCase
             ->method('setOwner')
             ->with($this->equalTo($user->id))
             ->willReturn($workflow);
-
-        $workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
 
         $this->site->expects($this->once())
             ->method('getName')

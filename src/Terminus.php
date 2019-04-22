@@ -2,68 +2,21 @@
 
 namespace Pantheon\Terminus;
 
+use Composer\Autoload\ClassLoader;
 use Composer\Semver\Semver;
-use Consolidation\AnnotatedCommand\CommandFileDiscovery;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request as HttpRequest;
-use League\Container\Argument\RawArgument;
 use League\Container\ContainerAwareInterface;
 use League\Container\ContainerAwareTrait;
-use Pantheon\Terminus\Collections\Backups;
-use Pantheon\Terminus\Collections\Bindings;
-use Pantheon\Terminus\Collections\Branches;
-use Pantheon\Terminus\Collections\Commits;
-use Pantheon\Terminus\Collections\Environments;
-use Pantheon\Terminus\Collections\Domains;
-use Pantheon\Terminus\Collections\Loadbalancers;
-use Pantheon\Terminus\Collections\PaymentMethods;
-use Pantheon\Terminus\Collections\MachineTokens;
-use Pantheon\Terminus\Collections\OrganizationSiteMemberships;
-use Pantheon\Terminus\Collections\OrganizationUserMemberships;
 use Pantheon\Terminus\Collections\SavedTokens;
-use Pantheon\Terminus\Collections\SiteOrganizationMemberships;
 use Pantheon\Terminus\Collections\Sites;
-use Pantheon\Terminus\Collections\SiteUserMemberships;
-use Pantheon\Terminus\Collections\SSHKeys;
-use Pantheon\Terminus\Collections\Tags;
-use Pantheon\Terminus\Collections\Upstreams;
-use Pantheon\Terminus\Collections\UserOrganizationMemberships;
-use Pantheon\Terminus\Collections\UserSiteMemberships;
-use Pantheon\Terminus\Collections\Workflows;
-use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Config\ConfigAwareTrait;
 use Pantheon\Terminus\DataStore\FileStore;
 use Pantheon\Terminus\Helpers\LocalMachineHelper;
-use Pantheon\Terminus\Models\Backup;
-use Pantheon\Terminus\Models\Binding;
-use Pantheon\Terminus\Models\Branch;
-use Pantheon\Terminus\Models\Commit;
-use Pantheon\Terminus\Models\Environment;
-use Pantheon\Terminus\Models\Domain;
-use Pantheon\Terminus\Models\PaymentMethod;
-use Pantheon\Terminus\Models\Loadbalancer;
-use Pantheon\Terminus\Models\Lock;
-use Pantheon\Terminus\Models\MachineToken;
-use Pantheon\Terminus\Models\NewRelic;
-use Pantheon\Terminus\Models\Organization;
-use Pantheon\Terminus\Models\OrganizationSiteMembership;
-use Pantheon\Terminus\Models\OrganizationUserMembership;
-use Pantheon\Terminus\Models\Redis;
-use Pantheon\Terminus\Models\SavedToken;
-use Pantheon\Terminus\Models\Site;
-use Pantheon\Terminus\Models\SiteOrganizationMembership;
-use Pantheon\Terminus\Models\SiteUserMembership;
-use Pantheon\Terminus\Models\Solr;
-use Pantheon\Terminus\Models\SSHKey;
-use Pantheon\Terminus\Models\Tag;
-use Pantheon\Terminus\Models\Upstream;
-use Pantheon\Terminus\Models\UpstreamStatus;
-use Pantheon\Terminus\Models\User;
-use Pantheon\Terminus\Models\UserOrganizationMembership;
-use Pantheon\Terminus\Models\UserSiteMembership;
-use Pantheon\Terminus\Models\Workflow;
-use Pantheon\Terminus\Models\WorkflowOperation;
+use Pantheon\Terminus\Plugins\PluginAutoloadDependencies;
 use Pantheon\Terminus\Plugins\PluginDiscovery;
-use Pantheon\Terminus\Plugins\PluginInfo;
+use Pantheon\Terminus\ProgressBars\ProcessProgressBar;
+use Pantheon\Terminus\ProgressBars\WorkflowProgressBar;
 use Pantheon\Terminus\Request\Request;
 use Pantheon\Terminus\Request\RequestAwareInterface;
 use Pantheon\Terminus\Session\Session;
@@ -73,11 +26,11 @@ use Pantheon\Terminus\Update\LatestRelease;
 use Pantheon\Terminus\Update\UpdateChecker;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerAwareTrait;
-use Robo\Common\ConfigAwareTrait;
-use Robo\Config;
+use Robo\Config\Config;
 use Robo\Contract\ConfigAwareInterface;
 use Robo\Robo;
 use Robo\Runner as RoboRunner;
+use SelfUpdate\SelfUpdateCommand;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -106,7 +59,7 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
     /**
      * Object constructor
      *
-     * @param \Robo\Config $config
+     * @param \Robo\Config\Config $config
      * @param \Symfony\Component\Console\Input\InputInterface $input
      * @param \Symfony\Component\Console\Output\OutputInterface $output
      */
@@ -122,21 +75,27 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
 
         $this->configureContainer();
 
+        $this->setLogger($container->get('logger'));
+
         $this->addBuiltInCommandsAndHooks();
         $this->addPluginsCommandsAndHooks();
+
+        if (\Phar::running(true)) {
+            $cmd = new SelfUpdateCommand('Terminus', $config->get('version'), 'pantheon-systems/terminus');
+            $application->add($cmd);
+        }
 
         $this->runner = new RoboRunner();
         $this->runner->setContainer($container);
 
-        $this->setLogger($container->get('logger'));
-
         date_default_timezone_set($config->get('time_zone'));
+        setlocale(LC_MONETARY, $config->get('monetary_locale'));
     }
 
     /**
      * Runs the instantiated Terminus application
      *
-     * @param InputInterface  $input  An input object to run the application with
+     * @param InputInterface $input An input object to run the application with
      * @param OutputInterface $output An output object to run the application with
      * @return integer $status_code The exiting status code of the application
      */
@@ -149,7 +108,7 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
         $status_code = $this->runner->run($input, $output, null, $this->commands);
         if (!empty($cassette) && !empty($mode)) {
             $this->stopVCR();
-        } else {
+        } elseif ($input->isInteractive()) {
             $this->runUpdateChecker();
         }
         return $status_code;
@@ -160,14 +119,130 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
      */
     private function addBuiltInCommandsAndHooks()
     {
-        $commands = $this->getCommands([
-            'path' => __DIR__ . '/Commands',
-            'namespace' => 'Pantheon\Terminus\Commands',
-        ]);
-        $hooks = [
-            'Pantheon\Terminus\Hooks\Authorizer',
+        // List of all hooks and commands. Update via 'composer update-class-lists'
+        $this->commands = [
+            'Pantheon\\Terminus\\Hooks\\Authorizer',
+            'Pantheon\\Terminus\\Hooks\\SiteEnvLookup',
+            'Pantheon\\Terminus\\Commands\\AliasesCommand',
+            'Pantheon\\Terminus\\Commands\\ArtCommand',
+            'Pantheon\\Terminus\\Commands\\Auth\\LoginCommand',
+            'Pantheon\\Terminus\\Commands\\Auth\\LogoutCommand',
+            'Pantheon\\Terminus\\Commands\\Auth\\WhoamiCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\Automatic\\DisableCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\Automatic\\EnableCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\Automatic\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\BackupCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\CreateCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\GetCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\RestoreCommand',
+            'Pantheon\\Terminus\\Commands\\Backup\\SingleBackupCommand',
+            'Pantheon\\Terminus\\Commands\\Branch\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Connection\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Connection\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\Dashboard\\ViewCommand',
+            'Pantheon\\Terminus\\Commands\\Domain\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\Domain\\DNSCommand',
+            'Pantheon\\Terminus\\Commands\\Domain\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Domain\\LookupCommand',
+            'Pantheon\\Terminus\\Commands\\Domain\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\ClearCacheCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\CloneContentCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\CodeLogCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\CommitCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\DeployCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\DiffStatCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\MetricsCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\ViewCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\WakeCommand',
+            'Pantheon\\Terminus\\Commands\\Env\\WipeCommand',
+            'Pantheon\\Terminus\\Commands\\HTTPS\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\HTTPS\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\HTTPS\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\Import\\CompleteCommand',
+            'Pantheon\\Terminus\\Commands\\Import\\DatabaseCommand',
+            'Pantheon\\Terminus\\Commands\\Import\\FilesCommand',
+            'Pantheon\\Terminus\\Commands\\Import\\SiteCommand',
+            'Pantheon\\Terminus\\Commands\\Lock\\DisableCommand',
+            'Pantheon\\Terminus\\Commands\\Lock\\EnableCommand',
+            'Pantheon\\Terminus\\Commands\\Lock\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\MachineToken\\DeleteAllCommand',
+            'Pantheon\\Terminus\\Commands\\MachineToken\\DeleteCommand',
+            'Pantheon\\Terminus\\Commands\\MachineToken\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Multidev\\CreateCommand',
+            'Pantheon\\Terminus\\Commands\\Multidev\\DeleteCommand',
+            'Pantheon\\Terminus\\Commands\\Multidev\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Multidev\\MergeFromDevCommand',
+            'Pantheon\\Terminus\\Commands\\Multidev\\MergeToDevCommand',
+            'Pantheon\\Terminus\\Commands\\NewRelic\\DisableCommand',
+            'Pantheon\\Terminus\\Commands\\NewRelic\\EnableCommand',
+            'Pantheon\\Terminus\\Commands\\NewRelic\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\People\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\People\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\People\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\People\\RoleCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\Site\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\Site\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Org\\Upstream\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Owner\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\PaymentMethod\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\PaymentMethod\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\PaymentMethod\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Plan\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Plan\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Plan\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\Redis\\DisableCommand',
+            'Pantheon\\Terminus\\Commands\\Redis\\EnableCommand',
+            'Pantheon\\Terminus\\Commands\\Remote\\DrushCommand',
+            'Pantheon\\Terminus\\Commands\\Remote\\SSHBaseCommand',
+            'Pantheon\\Terminus\\Commands\\Remote\\WPCommand',
+            'Pantheon\\Terminus\\Commands\\SSHKey\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\SSHKey\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\SSHKey\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Self\\ClearCacheCommand',
+            'Pantheon\\Terminus\\Commands\\Self\\ConfigDumpCommand',
+            'Pantheon\\Terminus\\Commands\\Self\\ConsoleCommand',
+            'Pantheon\\Terminus\\Commands\\Self\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\ServiceLevel\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\CreateCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\DeleteCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\LookupCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Org\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Org\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Org\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\SiteCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Team\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Team\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Team\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Team\\RoleCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Upstream\\ClearCacheCommand',
+            'Pantheon\\Terminus\\Commands\\Site\\Upstream\\SetCommand',
+            'Pantheon\\Terminus\\Commands\\Solr\\DisableCommand',
+            'Pantheon\\Terminus\\Commands\\Solr\\EnableCommand',
+            'Pantheon\\Terminus\\Commands\\Tag\\AddCommand',
+            'Pantheon\\Terminus\\Commands\\Tag\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Tag\\RemoveCommand',
+            'Pantheon\\Terminus\\Commands\\Tag\\TagCommand',
+            'Pantheon\\Terminus\\Commands\\TerminusCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\InfoCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\Updates\\ApplyCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\Updates\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\Updates\\StatusCommand',
+            'Pantheon\\Terminus\\Commands\\Upstream\\Updates\\UpdatesCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\Info\\InfoBaseCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\Info\\LogsCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\Info\\OperationsCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\Info\\StatusCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\ListCommand',
+            'Pantheon\\Terminus\\Commands\\Workflow\\WatchCommand'
         ];
-        $this->commands = array_merge($commands, $hooks);
     }
 
     /**
@@ -177,7 +252,9 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
      */
     private function addDefaultArgumentsAndOptions(Application $app)
     {
-        $app->getDefinition()->addOption(new InputOption('--yes', '-y', InputOption::VALUE_NONE, 'Answer all confirmations with "yes"'));
+        $app->getDefinition()->addOption(
+            new InputOption('--yes', '-y', InputOption::VALUE_NONE, 'Answer all confirmations with "yes"')
+        );
     }
 
     /**
@@ -186,11 +263,14 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
     private function addPluginsCommandsAndHooks()
     {
         // Rudimentary plugin loading.
-        $discovery = $this->getContainer()->get(PluginDiscovery::class, [$this->getConfig()->get('plugins_dir')]);
+        $discovery = $this->getContainer()->get(PluginDiscovery::class);
         $plugins = $discovery->discover();
         $version = $this->config->get('version');
+        $classLoader = new ClassLoader();
+        $classLoader->register();
         foreach ($plugins as $plugin) {
             if (Semver::satisfies($version, $plugin->getCompatibleTerminusVersion())) {
+                $plugin->autoloadPlugin($classLoader);
                 $this->commands += $plugin->getCommandsAndHooks();
             } else {
                 $this->logger->warning(
@@ -228,63 +308,20 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
         $container->inflector(SavedTokens::class)
             ->invokeMethod('setDataStore', [$token_store]);
 
-        // Add the models and collections
-        $container->add(User::class);
-        $container->add(SavedTokens::class);
-        $container->add(SavedToken::class);
-        $container->add(PaymentMethods::class);
-        $container->add(PaymentMethod::class);
-        $container->add(SSHKeys::class);
-        $container->add(SSHKey::class);
-        $container->add(Workflows::class);
-        $container->add(Workflow::class);
-        $container->add(WorkflowOperation::class);
-        $container->add(Loadbalancers::class);
-        $container->add(MachineTokens::class);
-        $container->add(MachineToken::class);
-        $container->add(Upstream::class);
-        $container->add(Upstreams::class);
-        $container->add(UpstreamStatus::class);
-        $container->add(UserSiteMemberships::class);
-        $container->add(UserSiteMembership::class);
-        $container->add(UserOrganizationMemberships::class);
-        $container->add(UserOrganizationMembership::class);
-        $container->add(OrganizationSiteMemberships::class);
-        $container->add(OrganizationSiteMembership::class);
-        $container->add(OrganizationUserMemberships::class);
-        $container->add(OrganizationUserMembership::class);
-        $container->add(Organization::class);
-        $container->add(Branches::class);
-        $container->add(Branch::class);
-        $container->add(SiteUserMemberships::class);
-        $container->add(SiteUserMembership::class);
-        $container->add(SiteOrganizationMemberships::class);
-        $container->add(SiteOrganizationMembership::class);
-        $container->add(Site::class);
-        $container->add(Redis::class);
-        $container->add(Solr::class);
-        $container->add(Environments::class);
-        $container->add(Environment::class);
-        $container->add(Backups::class);
-        $container->add(Backup::class);
-        $container->add(Loadbalancer::class);
-        $container->add(Lock::class);
-        $container->add(Bindings::class);
-        $container->add(Binding::class);
-        $container->add(Domains::class);
-        $container->add(Domain::class);
-        $container->add(Commits::class);
-        $container->add(Commit::class);
-        $container->add(NewRelic::class);
-        $container->add(Tags::class);
-        $container->add(Tag::class);
+        $this->configureModulesAndCollections($container);
 
         // Helpers
         $container->add(LocalMachineHelper::class);
 
+        // Progress Bars
+        $container->add(ProcessProgressBar::class);
+        $container->add(WorkflowProgressBar::class);
+
         // Plugin handlers
-        $container->add(PluginDiscovery::class);
-        $container->add(PluginInfo::class);
+        $container->share('pluginAutoloadDependencies', PluginAutoloadDependencies::class)
+            ->withArgument(__DIR__);
+        $container->add(PluginDiscovery::class)
+            ->withArgument($this->getConfig()->get('plugins_dir'));
 
         // Update checker
         $container->add(LatestRelease::class);
@@ -301,21 +338,81 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
         $factory = $container->get('commandFactory');
         $factory->setIncludeAllPublicMethods(false);
         $factory->setDataStore($commandCacheDataStore);
+
+        // Call our autoload loader at the beginning of any command dispatch.
+        $pluginAutoloadDependencies = $container->get('pluginAutoloadDependencies');
+        $factory->hookManager()->addInitializeHook($pluginAutoloadDependencies);
     }
 
-    /**
-     * Discovers command classes using CommandFileDiscovery
-     *
-     * @param string[] $options Elements as follow
-     *        string path      The full path to the directory to search for commands
-     *        string namespace The full namespace associated with given the command directory
-     * @return TerminusCommand[] An array of TerminusCommand instances
-     */
-    private function getCommands(array $options = ['path' => null, 'namespace' => null,])
+    private function configureModulesAndCollections($container)
     {
-        $discovery = new CommandFileDiscovery();
-        $discovery->setSearchPattern('*Command.php')->setSearchLocations([]);
-        return $discovery->discover($options['path'], $options['namespace']);
+        // List of all Models and Collections. Update via 'composer update-class-lists'
+
+        // Models
+        $container->add(\Pantheon\Terminus\Models\Backup::class);
+        $container->add(\Pantheon\Terminus\Models\Binding::class);
+        $container->add(\Pantheon\Terminus\Models\Branch::class);
+        $container->add(\Pantheon\Terminus\Models\Commit::class);
+        $container->add(\Pantheon\Terminus\Models\DNSRecord::class);
+        $container->add(\Pantheon\Terminus\Models\Domain::class);
+        $container->add(\Pantheon\Terminus\Models\Environment::class);
+        $container->add(\Pantheon\Terminus\Models\Lock::class);
+        $container->add(\Pantheon\Terminus\Models\MachineToken::class);
+        $container->add(\Pantheon\Terminus\Models\Metric::class);
+        $container->add(\Pantheon\Terminus\Models\NewRelic::class);
+        $container->add(\Pantheon\Terminus\Models\Organization::class);
+        $container->add(\Pantheon\Terminus\Models\OrganizationSiteMembership::class);
+        $container->add(\Pantheon\Terminus\Models\OrganizationUpstream::class);
+        $container->add(\Pantheon\Terminus\Models\OrganizationUserMembership::class);
+        $container->add(\Pantheon\Terminus\Models\PaymentMethod::class);
+        $container->add(\Pantheon\Terminus\Models\Plan::class);
+        $container->add(\Pantheon\Terminus\Models\Profile::class);
+        $container->add(\Pantheon\Terminus\Models\Redis::class);
+        $container->add(\Pantheon\Terminus\Models\SSHKey::class);
+        $container->add(\Pantheon\Terminus\Models\SavedToken::class);
+        $container->add(\Pantheon\Terminus\Models\Site::class);
+        $container->add(\Pantheon\Terminus\Models\SiteAuthorization::class);
+        $container->add(\Pantheon\Terminus\Models\SiteOrganizationMembership::class);
+        $container->add(\Pantheon\Terminus\Models\SiteUpstream::class);
+        $container->add(\Pantheon\Terminus\Models\SiteUserMembership::class);
+        $container->add(\Pantheon\Terminus\Models\Solr::class);
+        $container->add(\Pantheon\Terminus\Models\Tag::class);
+        $container->add(\Pantheon\Terminus\Models\Upstream::class);
+        $container->add(\Pantheon\Terminus\Models\UpstreamStatus::class);
+        $container->add(\Pantheon\Terminus\Models\User::class);
+        $container->add(\Pantheon\Terminus\Models\UserOrganizationMembership::class);
+        $container->add(\Pantheon\Terminus\Models\UserSiteMembership::class);
+        $container->add(\Pantheon\Terminus\Models\Workflow::class);
+        $container->add(\Pantheon\Terminus\Models\WorkflowOperation::class);
+
+        // Collections
+        $container->add(\Pantheon\Terminus\Collections\Backups::class);
+        $container->add(\Pantheon\Terminus\Collections\Bindings::class);
+        $container->add(\Pantheon\Terminus\Collections\Branches::class);
+        $container->add(\Pantheon\Terminus\Collections\Commits::class);
+        $container->add(\Pantheon\Terminus\Collections\DNSRecords::class);
+        $container->add(\Pantheon\Terminus\Collections\Domains::class);
+        $container->add(\Pantheon\Terminus\Collections\EnvironmentMetrics::class);
+        $container->add(\Pantheon\Terminus\Collections\Environments::class);
+        $container->add(\Pantheon\Terminus\Collections\MachineTokens::class);
+        $container->add(\Pantheon\Terminus\Collections\OrganizationSiteMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\OrganizationUpstreams::class);
+        $container->add(\Pantheon\Terminus\Collections\OrganizationUserMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\PaymentMethods::class);
+        $container->add(\Pantheon\Terminus\Collections\Plans::class);
+        $container->add(\Pantheon\Terminus\Collections\SSHKeys::class);
+        $container->add(\Pantheon\Terminus\Collections\SavedTokens::class);
+        $container->add(\Pantheon\Terminus\Collections\SiteAuthorizations::class);
+        $container->add(\Pantheon\Terminus\Collections\SiteMetrics::class);
+        $container->add(\Pantheon\Terminus\Collections\SiteOrganizationMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\SiteUserMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\Sites::class);
+        $container->add(\Pantheon\Terminus\Collections\Tags::class);
+        $container->add(\Pantheon\Terminus\Collections\Upstreams::class);
+        $container->add(\Pantheon\Terminus\Collections\UserOrganizationMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\UserSiteMemberships::class);
+        $container->add(\Pantheon\Terminus\Collections\WorkflowOperations::class);
+        $container->add(\Pantheon\Terminus\Collections\Workflows::class);
     }
 
     /**
@@ -333,7 +430,6 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
      * @param string[] $options Elements as follow:
      *        string cassette The name of the fixture in tests/fixtures to record or run in this feature test run
      *        string mode     Mode in which to run PHP-VCR (options are none, once, strict, and new_episodes)
-     * @return void
      */
     private function startVCR(array $options = ['cassette' => 'tmp', 'mode' => 'none',])
     {
@@ -345,8 +441,6 @@ class Terminus implements ConfigAwareInterface, ContainerAwareInterface, LoggerA
 
     /**
      * Stops PHP-VCR's recording and playback
-     *
-     * @return void
      */
     private function stopVCR()
     {

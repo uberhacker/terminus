@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\UnitTests\Commands\Site\Team;
 
 use Pantheon\Terminus\Commands\Site\Team\AddCommand;
+use Pantheon\Terminus\UnitTests\Commands\WorkflowProgressTrait;
 
 /**
  * Class AddCommandTest
@@ -11,6 +12,8 @@ use Pantheon\Terminus\Commands\Site\Team\AddCommand;
  */
 class AddCommandTest extends TeamCommandTest
 {
+    use WorkflowProgressTrait;
+
     /**
      * @var string
      */
@@ -26,17 +29,15 @@ class AddCommandTest extends TeamCommandTest
         $this->message = 'message';
 
         $this->workflow->expects($this->once())
-            ->method('checkProgress')
-            ->with()
-            ->willReturn(true);
-        $this->workflow->expects($this->once())
             ->method('getMessage')
             ->with()
             ->willReturn($this->message);
 
         $this->command = new AddCommand($this->getConfig());
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSites($this->sites);
+        $this->expectWorkflowProcessing();
     }
 
     /**
@@ -98,6 +99,32 @@ class AddCommandTest extends TeamCommandTest
             );
 
         $out = $this->command->add('mysite', $new_member, $role);
+        $this->assertNull($out);
+    }
+
+
+    /**
+     * Tests the site:team:add command when change_management is not enabled and the role param is not given
+     */
+    public function testAddCommandRestrictedNoRole()
+    {
+        $new_member = 'test@example.com';
+        $default_role = 'team_member';
+
+        $this->site->expects($this->never())
+            ->method('getFeature');
+        $this->user_memberships->expects($this->once())
+            ->method('create')
+            ->willReturn($this->workflow)
+            ->with($new_member, $default_role);
+        $this->logger->expects($this->once())
+            ->method('log')
+            ->with(
+                $this->equalTo('notice'),
+                $this->equalTo($this->message)
+            );
+
+        $out = $this->command->add('mysite', $new_member);
         $this->assertNull($out);
     }
 }

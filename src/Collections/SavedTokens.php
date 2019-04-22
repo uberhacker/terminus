@@ -2,12 +2,11 @@
 
 namespace Pantheon\Terminus\Collections;
 
+use Pantheon\Terminus\Config\ConfigAwareTrait;
 use Pantheon\Terminus\DataStore\DataStoreAwareInterface;
 use Pantheon\Terminus\DataStore\DataStoreAwareTrait;
 use Pantheon\Terminus\Models\SavedToken;
-use Robo\Common\ConfigAwareTrait;
 use Robo\Contract\ConfigAwareInterface;
-use Pantheon\Terminus\Exceptions\TerminusException;
 
 /**
  * Class SavedTokens
@@ -18,6 +17,7 @@ class SavedTokens extends TerminusCollection implements ConfigAwareInterface, Da
     use ConfigAwareTrait;
     use DataStoreAwareTrait;
 
+    const PRETTY_NAME = 'tokens';
     /**
      * @var string
      */
@@ -63,44 +63,23 @@ class SavedTokens extends TerminusCollection implements ConfigAwareInterface, Da
      */
     public function deleteAll()
     {
-        foreach ($this->getMembers() as $token) {
+        foreach ($this->all() as $token) {
             $token->delete();
         }
     }
 
     /**
-     * Retrieves the model with site of the given email or machine token
-     *
-     * @param string $id Email or machine token to look up a saved token by
-     * @return \Pantheon\Terminus\Models\SavedToken
-     * @throws \Pantheon\Terminus\Exceptions\TerminusException
-     */
-    public function get($id)
-    {
-        $tokens = $this->getMembers();
-        if (isset($tokens[$id])) {
-            return $tokens[$id];
-        } else {
-            if (is_array($tokens)) {
-                foreach ($tokens as $token) {
-                    if ($id == $token->get('token')) {
-                        return $token;
-                    }
-                }
-            }
-        }
-        throw new TerminusException('Could not find a saved token identified by {id}.', compact('id'));
-    }
-
-    /**
      * @inheritdoc
      */
-    protected function getCollectionData($options = [])
+    public function getData()
     {
-        $tokens = [];
-        foreach ($this->getDataStore()->keys() as $key) {
-            $tokens[] = (object)$this->getDataStore()->get($key);
+        if (empty(parent::getData())) {
+            $tokens = [];
+            foreach ($this->getDataStore()->keys() as $key) {
+                $tokens[] = (object)$this->getDataStore()->get($key);
+            }
+            $this->setData($tokens);
         }
-        return $tokens;
+        return parent::getData();
     }
 }

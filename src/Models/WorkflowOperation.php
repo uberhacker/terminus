@@ -8,6 +8,8 @@ namespace Pantheon\Terminus\Models;
  */
 class WorkflowOperation extends TerminusModel
 {
+    const PRETTY_NAME = 'workflow operation';
+
     /**
      * @inheritdoc
      */
@@ -19,6 +21,21 @@ class WorkflowOperation extends TerminusModel
             $this->get('environment'),
             $this->get('log_output')
         );
+    }
+
+    /**
+     * Formats operation object into a descriptive string
+     *
+     * @return string
+     */
+    public function description()
+    {
+        $description = sprintf(
+            'Operation: %s finished in %s',
+            $this->get('description'),
+            $this->duration()
+        );
+        return $description;
     }
 
     /**
@@ -41,21 +58,6 @@ class WorkflowOperation extends TerminusModel
         }
 
         return $data;
-    }
-
-    /**
-     * Formats operation object into a descriptive string
-     *
-     * @return string
-     */
-    public function description()
-    {
-        $description = sprintf(
-            'Operation: %s finished in %s',
-            $this->get('description'),
-            $this->duration()
-        );
-        return $description;
     }
 
     /**

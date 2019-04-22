@@ -8,17 +8,15 @@ use Pantheon\Terminus\Models\Environment;
  * Class EnvironmentOwnedCollection
  * @package Pantheon\Terminus\Collections
  */
-class EnvironmentOwnedCollection extends TerminusCollection
+abstract class EnvironmentOwnedCollection extends APICollection
 {
     /**
      * @var Environment
      */
-    public $environment;
+    private $environment;
 
     /**
-     * Object constructor
-     *
-     * @param array $options Options to set as $this->key
+     * @inheritdoc
      */
     public function __construct($options = [])
     {
@@ -58,7 +56,7 @@ class EnvironmentOwnedCollection extends TerminusCollection
     {
         $tr = [
             '{environment_id}' => $this->getEnvironment()->id,
-            '{site_id}' => $this->getEnvironment()->site->id
+            '{site_id}' => $this->getEnvironment()->getSite()->id
         ];
         return strtr($url, $tr);
     }

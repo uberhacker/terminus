@@ -2,26 +2,37 @@
 
 namespace Pantheon\Terminus\Models;
 
+use Pantheon\Terminus\Friends\OrganizationInterface;
+use Pantheon\Terminus\Friends\OrganizationTrait;
+
 /**
  * Class Upstream
  * @package Pantheon\Terminus\Models
  */
-class Upstream extends TerminusModel
+class Upstream extends TerminusModel implements OrganizationInterface
 {
+    use OrganizationTrait;
+
+    const PRETTY_NAME = 'upstream';
     /**
-     * @inheritdoc
+     * @var string
      */
-    public function __construct($attributes, array $options = [])
+    protected $url = 'upstreams/{id}';
+
+    /**
+     * @return Organization|null Returns a Organization-type object
+     */
+    public function getOrganization()
     {
-        parent::__construct($attributes, $options);
+        return $this->organization;
     }
 
     /**
-     * @inheritdoc
+     * @return string[]
      */
-    public function __toString()
+    public function getReferences()
     {
-        return "{$this->id}: {$this->get('url')}";
+        return [$this->id, $this->get('product_id'), $this->get('label'), $this->get('machine_name'),];
     }
 
     /**
@@ -29,27 +40,8 @@ class Upstream extends TerminusModel
      */
     public function serialize()
     {
-        if (!empty($this->site)) {
-            return [
-                'url' => $this->get('url'),
-                'product_id' => $this->get('product_id'),
-                'branch' => $this->get('branch'),
-            ];
-        }
-        return (array)$this->attributes;
-    }
-
-    /**
-     * @inheritdoc
-     */
-    protected function parseAttributes($data)
-    {
-        if (property_exists($data, 'attributes')) {
-            $data = $data->attributes;
-        }
-        if (property_exists($data, 'product_id')) {
-            $data->id = $data->product_id;
-        }
+        $data = (array)$this->attributes;
+        $data['organization'] = is_null($org = $this->getOrganization()) ? null : $org->getLabel();
         return $data;
     }
 }

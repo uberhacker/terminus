@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\Commands\Site\Org;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 use Pantheon\Terminus\Site\SiteAwareInterface;
 use Pantheon\Terminus\Site\SiteAwareTrait;
 
@@ -13,6 +14,7 @@ use Pantheon\Terminus\Site\SiteAwareTrait;
 class AddCommand extends TerminusCommand implements SiteAwareInterface
 {
     use SiteAwareTrait;
+    use WorkflowProcessingTrait;
 
     /**
      * Associates a supporting organization with a site.
@@ -28,17 +30,15 @@ class AddCommand extends TerminusCommand implements SiteAwareInterface
      */
     public function add($site, $organization)
     {
-        $org = $this->session()->getUser()->getOrgMemberships()->get($organization)->getOrganization();
+        $org = $this->session()->getUser()->getOrganizationMemberships()->get($organization)->getOrganization();
         $site = $this->getSite($site);
 
-        $workflow = $site->getOrganizationMemberships()->create($organization, 'team_member');
+        $workflow = $site->getOrganizationMemberships()->create($org, 'team_member');
         $this->log()->notice(
             'Adding {org} as a supporting organization to {site}.',
-            ['site' => $site->getName(), 'org' => $org->getName()]
+            ['site' => $site->getName(), 'org' => $org->getName(),]
         );
-        while (!$workflow->checkProgress()) {
-            // @TODO: Add Symfony progress bar to indicate that something is happening.
-        }
+        $this->processWorkflow($workflow);
         $this->log()->notice($workflow->getMessage());
     }
 }

@@ -11,9 +11,11 @@ use Pantheon\Terminus\Exceptions\TerminusException;
  * Class Sites
  * @package Pantheon\Terminus\Collections
  */
-class Sites extends TerminusCollection implements SessionAwareInterface
+class Sites extends APICollection implements SessionAwareInterface
 {
     use SessionAwareTrait;
+
+    const PRETTY_NAME = 'sites';
 
     /**
      * @var string
@@ -71,8 +73,8 @@ class Sites extends TerminusCollection implements SessionAwareInterface
         }
 
         if (!$options['team_only']) {
-            $memberships = $this->getUser()->getOrgMemberships()->fetch()->all();
-            if (!is_null($org_id = $options['org_id']) && ($org_id != 'all')) {
+            $memberships = $this->getUser()->getOrganizationMemberships()->fetch()->all();
+            if (!is_null($org_id = $options['org_id'])) {
                 $memberships = array_filter($memberships, function ($membership) use ($org_id) {
                     return $membership->id == $org_id;
                 });
@@ -102,21 +104,28 @@ class Sites extends TerminusCollection implements SessionAwareInterface
     }
 
     /**
-     * Filters an array of sites by whether the user is an organizational member
+     * Filters the members of this collection by their names
      *
      * @param string $regex Non-delimited PHP regex to filter site names by
      * @return Sites
      */
     public function filterByName($regex = '(.*)')
     {
-        $this->models = array_filter(
-            $this->getMembers(),
-            function ($site) use ($regex) {
-                preg_match("~$regex~", $site->get('name'), $matches);
-                return !empty($matches);
-            }
-        );
-        return $this;
+        return $this->filterByRegex('name', $regex);
+    }
+
+    /**
+     * Filters an array of sites by the plan name
+     *
+     * @param string $plan_name Name of the plan to filter by
+     * @return Sites
+     */
+    public function filterByPlanName($plan_name)
+    {
+        $plan_name = strtolower($plan_name);
+        return $this->filter(function ($model) use ($plan_name) {
+            return (strtolower($model->get('plan_name')) === $plan_name);
+        });
     }
 
     /**
@@ -127,13 +136,9 @@ class Sites extends TerminusCollection implements SessionAwareInterface
      */
     public function filterByOwner($owner_uuid)
     {
-        $this->models = array_filter(
-            $this->getMembers(),
-            function ($model) use ($owner_uuid) {
-                return ($model->get('owner') == $owner_uuid);
-            }
-        );
-        return $this;
+        return $this->filter(function ($model) use ($owner_uuid) {
+            return ($model->get('owner') == $owner_uuid);
+        });
     }
 
     /**
@@ -144,13 +149,23 @@ class Sites extends TerminusCollection implements SessionAwareInterface
      */
     public function filterByTag($tag)
     {
-        $this->models = array_filter(
-            $this->getMembers(),
-            function ($site) use ($tag) {
-                return $site->tags->has($tag);
-            }
-        );
-        return $this;
+        return $this->filter(function ($site) use ($tag) {
+            return $site->tags->has($tag);
+        });
+    }
+
+    /**
+     * Filters sites list by upstream
+     *
+     * @param string $upstream_id An upstream to filter by
+     * @return Sites
+     */
+    public function filterByUpstream($upstream_id)
+    {
+        $upstream_id = strtolower($upstream_id);
+        return $this->filter(function ($model) use ($upstream_id) {
+            return in_array($upstream_id, $model->getUpstream()->getReferences());
+        });
     }
 
     /**
@@ -189,17 +204,7 @@ class Sites extends TerminusCollection implements SessionAwareInterface
                 );
             }
         } else {
-            // If we have a list of sites already then look through it for the given site.
-            if (isset($this->models[$id])) {
-                // Search by id
-                $site = $this->models[$id];
-            } else {
-                // Search by name
-                $list = $this->listing('name', 'id');
-                if (isset($list[$id])) {
-                    $site = $this->models[$list[$id]];
-                }
-            }
+            $site = parent::get($id);
         }
 
         return $site;

@@ -2,28 +2,31 @@
 
 namespace Pantheon\Terminus\Models;
 
+use League\Container\ContainerAwareInterface;
+use League\Container\ContainerAwareTrait;
+use Pantheon\Terminus\Collections\DNSRecords;
+use Pantheon\Terminus\Friends\EnvironmentInterface;
+use Pantheon\Terminus\Friends\EnvironmentTrait;
+
 /**
  * Class Domain
  * @package Pantheon\Terminus\Models
  */
-class Domain extends TerminusModel
+class Domain extends TerminusModel implements ContainerAwareInterface, EnvironmentInterface
 {
-    /**
-     * @var Environment
-     */
-    public $environment;
+    use ContainerAwareTrait;
+    use EnvironmentTrait;
 
     /**
-     * Object constructor
-     *
-     * @param object $attributes Attributes of this model
-     * @param array $options Options with which to configure this model
+     * @var DNSRecords
      */
-    public function __construct($attributes, array $options = [])
-    {
-        parent::__construct($attributes, $options);
-        $this->environment = $options['collection']->environment;
-    }
+    private $dns_records;
+
+    const PRETTY_NAME = 'domain';
+    /**
+     * @var string
+     */
+    protected $url = 'sites/{site_id}/environments/{env_id}/domains/{id}';
 
     /**
      * Delete a domain from an environment
@@ -32,14 +35,21 @@ class Domain extends TerminusModel
      */
     public function delete()
     {
-        $url = sprintf(
-            'sites/%s/environments/%s/hostnames/%s',
-            $this->environment->site->id,
-            $this->environment->id,
-            rawurlencode($this->id)
-        );
-        $response = $this->request->request($url, ['method' => 'delete']);
-        return $response['data'];
+        return $this->request->request($this->getUrl(), ['method' => 'delete',])['data'];
+    }
+
+    /**
+     * @return DNSRecords
+     */
+    public function getDNSRecords()
+    {
+        if (empty($this->dns_records)) {
+            $this->dns_records = $this->getContainer()->get(
+                DNSRecords::class,
+                [['data' => $this->get('dns_status_details')->dns_records, 'domain' => $this,],]
+            );
+        }
+        return $this->dns_records;
     }
 
     /**
@@ -49,14 +59,12 @@ class Domain extends TerminusModel
      */
     public function serialize()
     {
-        $data = [
-            'domain' => $this->id,
-            'dns_zone_name' => $this->get('dns_zone_name'),
-            'environment' => $this->get('environment'),
-            'site_id' => $this->get('site_id'),
-            'key' => $this->get('key'),
-            'deletable' => $this->get('deletable'),
+        return [
+            'id' => $this->id,
+            'type' => $this->get('type'),
+            'status' => in_array($this->get('status'), ['ok', 'okay',]) ? 'OK' : $this->get('status'),
+            'status_message' => $this->get('status_message'),
+            'deletable' => (boolean)$this->get('deletable'),
         ];
-        return $data;
     }
 }

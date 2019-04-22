@@ -22,6 +22,7 @@ class GetCommandTest extends BackupCommandTest
     {
         parent::setUp();
         $this->command = new GetCommand($this->sites);
+        $this->command->setContainer($this->getContainer());
         $this->command->setLogger($this->logger);
         $this->command->setSites($this->sites);
     }
@@ -40,10 +41,10 @@ class GetCommandTest extends BackupCommandTest
             ->willReturn($this->backup);
 
         $this->backup->expects($this->once())
-            ->method('getUrl')
+            ->method('getArchiveURL')
             ->willReturn($test_download_url);
 
-        $output = $this->command->getBackup('mysite.dev', ['file' => $test_filename,]);
+        $output = $this->command->get('mysite.dev', ['file' => $test_filename,]);
         $this->assertEquals($output, $test_download_url);
     }
 
@@ -58,10 +59,10 @@ class GetCommandTest extends BackupCommandTest
             ->willReturn([$this->backup]);
 
         $this->backup->expects($this->once())
-            ->method('getUrl')
+            ->method('getArchiveURL')
             ->willReturn('http://download');
 
-        $output = $this->command->getBackup('mysite.dev', ['element' => 'db',]);
+        $output = $this->command->get('mysite.dev', ['element' => 'db',]);
         $this->assertEquals($output, 'http://download');
     }
 
@@ -79,7 +80,7 @@ class GetCommandTest extends BackupCommandTest
 
         $this->setExpectedException(TerminusNotFoundException::class);
 
-        $out = $this->command->getBackup('mysite.dev', ['file' => $bad_file_name,]);
+        $out = $this->command->get('mysite.dev', ['file' => $bad_file_name,]);
         $this->assertNull($out);
     }
 
@@ -97,7 +98,7 @@ class GetCommandTest extends BackupCommandTest
             ->with($this->equalTo($element))
             ->willReturn([]);
         $this->backup->expects($this->never())
-            ->method('getUrl');
+            ->method('getArchiveURL');
         $this->site->expects($this->once())
             ->method('get')
             ->with($this->equalTo('name'))
@@ -107,7 +108,7 @@ class GetCommandTest extends BackupCommandTest
             "No backups available. Create one with `terminus backup:create $site.{$this->environment->id}`"
         );
 
-        $out = $this->command->getBackup("$site.{$this->environment->id}", compact('element'));
+        $out = $this->command->get("$site.{$this->environment->id}", compact('element'));
         $this->assertNull($out);
     }
 
@@ -128,7 +129,7 @@ class GetCommandTest extends BackupCommandTest
             ->with($test_filename)
             ->willReturn($this->backup);
         $this->backup->expects($this->once())
-            ->method('getUrl')
+            ->method('getArchiveURL')
             ->willReturn($test_download_url);
         $request->expects($this->once())
             ->method('download')
@@ -138,7 +139,7 @@ class GetCommandTest extends BackupCommandTest
             );
 
         $this->command->setRequest($request);
-        $out = $this->command->getBackup('mysite.dev', ['file' => $test_filename, 'to' => $test_save_path,]);
+        $out = $this->command->get('mysite.dev', ['file' => $test_filename, 'to' => $test_save_path,]);
         $this->assertNull($out);
     }
 }

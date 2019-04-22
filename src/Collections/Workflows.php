@@ -15,10 +15,11 @@ use Pantheon\Terminus\Session\SessionAwareTrait;
  * Class Workflows
  * @package Pantheon\Terminus\Collections
  */
-class Workflows extends TerminusCollection implements SessionAwareInterface
+class Workflows extends APICollection implements SessionAwareInterface
 {
     use SessionAwareTrait;
 
+    const PRETTY_NAME = 'workflows';
     /**
      * @var string
      */
@@ -26,7 +27,7 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
     /**
      * @var TerminusModel
      */
-    protected $owner;
+    private $owner;
 
     /**
      * Instantiates the collection, sets param members as properties
@@ -89,8 +90,7 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
      */
     public function create($type, array $options = [])
     {
-        $options = array_merge(['params' => [],], $options);
-        $params = array_merge($this->args, $options['params']);
+        $params = isset($options['params']) ? $options['params'] : [];
 
         $results = $this->request()->request(
             $this->getUrl(),
@@ -131,25 +131,20 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
      */
     public function getUrl()
     {
-        if (!empty($this->url)) {
-            return $this->url;
-        }
-
-        // Determine the url based on the workflow owner.
         $owner = $this->getOwnerObject();
         switch (get_class($owner)) {
             case Environment::class:
-                $this->url = "sites/{$owner->site->id}/environments/{$owner->id}/workflows";
+                $this->url = "{$owner->getUrl()}/workflows";
                 break;
             case Organization::class:
-                $this->url = "users/{$this->session()->getUser()->id}/organizations/{$owner->id}/workflows";
+                $this->url = "{$this->session()->getUser()->getUrl()}/organizations/{$owner->id}/workflows";
                 // @TODO: This should be passed in rather than read from the current session.
                 break;
             case Site::class:
                 $this->url = "sites/{$owner->id}/workflows";
                 break;
             case User::class:
-                $this->url = "users/{$owner->id}/workflows";
+                $this->url = "{$owner->getUrl()}/workflows";
                 break;
         }
         return $this->url;
@@ -158,16 +153,12 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
     /**
      * Fetches workflow data hydrated with operations
      *
-     * @param array $options Additional information for the request
      * @return void
      */
-    public function fetchWithOperations($options = [])
+    public function fetchWithOperations()
     {
-        $options = array_merge(
-            $options,
-            ['fetch_args' => ['query' => ['hydrate' => 'operations',],],]
-        );
-        $this->fetch($options);
+        $this->setFetchArgs(['query' => ['hydrate' => 'operations',],]);
+        $this->fetch();
     }
 
     /**
@@ -178,12 +169,9 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
     public function findLatestWithLogs()
     {
         $workflows = $this->allWithLogs();
-        usort(
-            $workflows,
-            function ($a, $b) {
-                return ($a->wasFinishedAfter($b->get('finished_at'))) ? -1 : 1;
-            }
-        );
+        usort($workflows, function ($a, $b) {
+            return ($a->wasFinishedAfter($b->get('finished_at'))) ? -1 : 1;
+        });
 
         if (count($workflows) > 0) {
             return $workflows[0];
@@ -199,12 +187,9 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
     public function lastCreatedAt()
     {
         $workflows = $this->all();
-        usort(
-            $workflows,
-            function ($a, $b) {
-                return ($a->wasCreatedAfter($b->get('created_at'))) ? -1 : 1;
-            }
-        );
+        usort($workflows, function ($a, $b) {
+            return ($a->wasCreatedAfter($b->get('created_at'))) ? -1 : 1;
+        });
         if (!empty($workflows)) {
             $workflow = array_shift($workflows);
             return $workflow->get('created_at');
@@ -220,12 +205,9 @@ class Workflows extends TerminusCollection implements SessionAwareInterface
     public function lastFinishedAt()
     {
         $workflows = $this->all();
-        usort(
-            $workflows,
-            function ($a, $b) {
-                return ($a->wasFinishedAfter($b->get('finished_at'))) ? -1 : 1;
-            }
-        );
+        usort($workflows, function ($a, $b) {
+            return ($a->wasFinishedAfter($b->get('finished_at'))) ? -1 : 1;
+        });
         if (!empty($workflows)) {
             $workflow = array_shift($workflows);
             return $workflow->get('finished_at');

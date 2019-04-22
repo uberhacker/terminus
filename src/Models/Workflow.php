@@ -4,6 +4,7 @@ namespace Pantheon\Terminus\Models;
 
 use League\Container\ContainerAwareInterface;
 use League\Container\ContainerAwareTrait;
+use Pantheon\Terminus\Collections\WorkflowOperations;
 use Pantheon\Terminus\Session\SessionAwareInterface;
 use Pantheon\Terminus\Session\SessionAwareTrait;
 use Pantheon\Terminus\Exceptions\TerminusException;
@@ -17,13 +18,20 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
     use ContainerAwareTrait;
     use SessionAwareTrait;
 
+    const PRETTY_NAME = 'workflow';
+
+    /**
+     * @var array
+     */
+    public static $date_attributes = ['started_at', 'finished_at',];
     /**
      * @var TerminusModel
      */
-    protected $owner;
-
-    // @TODO: Make this configurable.
-    const POLLING_PERIOD = 3;
+    private $owner;
+    /**
+     * @var WorkflowOperations
+     */
+    private $workflow_operations;
 
     /**
      * Object constructor
@@ -44,12 +52,8 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
             $this->owner = $options['site'];
         } elseif (isset($options['user'])) {
             $this->owner = $options['user'];
-        } else {
-            try {
-                $this->owner = $options['collection']->getOwnerObject();
-            } catch (\Exception $e) {
-                throw new TerminusException('Could not locate an owner for this Workflow object.');
-            }
+        } elseif (isset($options['collection'])) {
+            $this->owner = $options['collection']->getOwnerObject();
         }
     }
 
@@ -76,6 +80,20 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
     }
 
     /**
+     * @return WorkflowOperations
+     */
+    public function getOperations()
+    {
+        if (empty($this->workflow_operations)) {
+            $this->workflow_operations = $this->getContainer()->get(
+                WorkflowOperations::class,
+                [['data' => $this->get('operations'),],]
+            );
+        }
+        return $this->workflow_operations;
+    }
+
+    /**
      * Get the URL for this model
      *
      * @return string
@@ -90,7 +108,7 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
         $owner = $this->getOwnerObject();
         switch (get_class($owner)) {
             case Environment::class:
-                $this->url = "sites/{$owner->site->id}/workflows/{$this->id}";
+                $this->url = "sites/{$owner->getSite()->id}/workflows/{$this->id}";
                 break;
             case Organization::class:
                 $this->url = "users/{$this->session()->getUser()->id}/organizations/{$owner->id}/workflows/{$this->id}";
@@ -196,20 +214,11 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
      * Returns a list of WorkflowOperations for this workflow
      *
      * @return WorkflowOperation[]
+     * @deprecated 1.5.1-dev Use $this->getOperations->all() for equivalent functionality
      */
     public function operations()
     {
-        $operations_data = [];
-        if (is_array($this->get('operations'))) {
-            $operations_data = $this->get('operations');
-        }
-
-        $operations = [];
-        foreach ($operations_data as $operation_data) {
-            $operations[] = $this->getContainer()->get(WorkflowOperation::class, [$operation_data]);
-        }
-
-        return $operations;
+        return $this->getOperations()->all();
     }
 
     /**
@@ -227,11 +236,6 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
             $elapsed_time = time() - $this->get('created_at');
         }
 
-        $operations_data = [];
-        foreach ($this->operations() as $operation) {
-            $operations_data[] = $operation->serialize();
-        }
-
         return [
             'id' => $this->id,
             'env' => $this->get('environment'),
@@ -241,46 +245,8 @@ class Workflow extends TerminusModel implements ContainerAwareInterface, Session
             'time' => sprintf('%ds', $elapsed_time),
             'finished_at' => $this->get('finished_at'),
             'started_at' => $this->get('started_at'),
-            'operations' => $operations_data,
+            'operations' => $this->getOperations()->serialize(),
         ];
-    }
-
-    /**
-     * Waits on this workflow to finish
-     *
-     * @deprecated 1.0.0 Use while($workflow->checkProgress) instead
-     *
-     * @return Workflow|void
-     * @throws TerminusException
-     *
-     * @deprecated 1.0.1 Use checkProgress to wait on workflows
-     */
-    public function wait()
-    {
-        while (!$this->isFinished()) {
-            $this->fetch();
-            sleep(self::POLLING_PERIOD);
-            /**
-             * TODO: Output this to stdout so that it doesn't get mixed with any
-             *   actual output. We can't use the logger here because that might be
-             *   redirected to a log file where each line is timestamped.
-             */
-            fwrite(STDERR, '.');
-        }
-        echo "\n";
-        if ($this->isSuccessful()) {
-            return $this;
-        } else {
-            $final_task = $this->get('final_task');
-            if (($final_task != null) && !empty($final_task->messages)) {
-                foreach ($final_task->messages as $data => $message) {
-                    if (!is_string($message->message)) {
-                        $message->message = print_r($message->message, true);
-                    }
-                    throw new TerminusException((string)$message->message);
-                }
-            }
-        }
     }
 
     /**

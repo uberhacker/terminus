@@ -3,6 +3,7 @@
 namespace Pantheon\Terminus\Commands\HTTPS;
 
 use Pantheon\Terminus\Commands\TerminusCommand;
+use Pantheon\Terminus\Commands\WorkflowProcessingTrait;
 use Pantheon\Terminus\Site\SiteAwareInterface;
 use Pantheon\Terminus\Site\SiteAwareTrait;
 
@@ -13,6 +14,7 @@ use Pantheon\Terminus\Site\SiteAwareTrait;
 class SetCommand extends TerminusCommand implements SiteAwareInterface
 {
     use SiteAwareTrait;
+    use WorkflowProcessingTrait;
 
     /**
      * Enables HTTPS and/or updates the SSL certificate for the environment.
@@ -52,9 +54,7 @@ class SetCommand extends TerminusCommand implements SiteAwareInterface
 
         // Wait for the workflow to complete.
         $this->log()->notice('SSL certificate updated. Converging loadbalancer.');
-        while (!$workflow->checkProgress()) {
-            // @TODO: Add Symfony progress bar to indicate that something is happening.
-        }
+        $this->processWorkflow($workflow);
         $this->log()->notice($workflow->getMessage());
     }
 }

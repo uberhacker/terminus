@@ -2,16 +2,18 @@
 
 namespace Pantheon\Terminus\Models;
 
+use Pantheon\Terminus\Friends\EnvironmentInterface;
+use Pantheon\Terminus\Friends\EnvironmentTrait;
+
 /**
  * Class Lock
  * @package Pantheon\Terminus\Models
  */
-class Lock extends TerminusModel
+class Lock extends TerminusModel implements EnvironmentInterface
 {
-    /**
-     * @var Environment
-     */
-    public $environment;
+    use EnvironmentTrait;
+
+    const PRETTY_NAME = 'lock';
 
     /**
      * @inheritdoc
@@ -19,7 +21,7 @@ class Lock extends TerminusModel
     public function __construct($attributes, $options = [])
     {
         parent::__construct($attributes, $options);
-        $this->environment = $options['environment'];
+        $this->setEnvironment($options['environment']);
     }
 
     /**
@@ -32,7 +34,7 @@ class Lock extends TerminusModel
      */
     public function enable($params)
     {
-        return $this->environment->getWorkflows()->create('lock_environment', compact('params'));
+        return $this->getEnvironment()->getWorkflows()->create('lock_environment', compact('params'));
     }
 
     /**
@@ -51,7 +53,7 @@ class Lock extends TerminusModel
     public function serialize()
     {
         return [
-            'locked' => $this->isLocked() ? 'true' : 'false',
+            'locked' => $this->isLocked(),
             'username' => $this->get('username'),
             'password' => $this->get('password'),
         ];
@@ -64,6 +66,6 @@ class Lock extends TerminusModel
      */
     public function disable()
     {
-        return $this->environment->getWorkflows()->create('unlock_environment');
+        return $this->getEnvironment()->getWorkflows()->create('unlock_environment');
     }
 }

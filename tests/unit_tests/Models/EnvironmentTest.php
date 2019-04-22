@@ -7,7 +7,6 @@ use Pantheon\Terminus\Collections\Backups;
 use Pantheon\Terminus\Collections\Bindings;
 use Pantheon\Terminus\Collections\Domains;
 use Pantheon\Terminus\Collections\Environments;
-use Pantheon\Terminus\Collections\Loadbalancers;
 use Pantheon\Terminus\Collections\Workflows;
 use Pantheon\Terminus\Helpers\LocalMachineHelper;
 use Pantheon\Terminus\Models\Binding;
@@ -20,6 +19,7 @@ use Pantheon\Terminus\Models\Workflow;
 use Pantheon\Terminus\Collections\Commits;
 use Pantheon\Terminus\Models\Commit;
 use Pantheon\Terminus\Exceptions\TerminusException;
+use Symfony\Component\Console\Output\Output;
 use Symfony\Component\Process\ProcessUtils;
 
 /**
@@ -53,10 +53,6 @@ class EnvironmentTest extends ModelTestCase
      * @var Domains
      */
     protected $domains;
-    /**
-     * @var Loadbalancers
-     */
-    protected $loadbalancers;
     /**
      * @var LocalMachineHelper
      */
@@ -111,13 +107,13 @@ class EnvironmentTest extends ModelTestCase
         $this->site->id = 'site id';
         $password = 'password';
         $port = 'port';
-        $hostname = 'hostname';
+        $domain = 'domain';
         $expected = [
             'password' => $password,
-            'host' => $hostname,
+            'host' => $domain,
             'port' => $port,
-            'url' => "redis://pantheon:$password@$hostname:$port",
-            'command' => "redis-cli -h $hostname -p $port -a $password",
+            'url' => "redis://pantheon:$password@$domain:$port",
+            'command' => "redis-cli -h $domain -p $port -a $password",
         ];
 
         $this->bindings->expects($this->once())
@@ -135,7 +131,7 @@ class EnvironmentTest extends ModelTestCase
         $this->binding->expects($this->at(2))
             ->method('get')
             ->with($this->equalTo('host'))
-            ->willReturn($hostname);
+            ->willReturn($domain);
         $this->binding->expects($this->at(3))
             ->method('get')
             ->with($this->equalTo('port'))
@@ -158,7 +154,7 @@ class EnvironmentTest extends ModelTestCase
         $this->assertEquals([], $out);
     }
 
-    public function testChangeConnectionMode()
+    public function testChangeConnectionModeToGit()
     {
         $this->setUpWorkflowOperationTest(
             'changeConnectionMode',
@@ -167,7 +163,10 @@ class EnvironmentTest extends ModelTestCase
             null,
             ['id' => 'dev', 'on_server_development' => true]
         );
+    }
 
+    public function testChangeConnectionModeToSFTP()
+    {
         $this->setUpWorkflowOperationTest(
             'changeConnectionMode',
             ['sftp'],
@@ -175,14 +174,26 @@ class EnvironmentTest extends ModelTestCase
             null,
             ['id' => 'dev']
         );
+    }
 
+    public function testChangeConnectionModeToSame()
+    {
         $model = $this->createModel(['id' => 'dev', 'on_server_development' => true,]);
-        $return = $model->changeConnectionMode('sftp');
-        $this->assertEquals('The connection mode is already set to sftp.', $return);
+        $this->setExpectedException(
+            TerminusException::class,
+            'The connection mode is already set to sftp.'
+        );
+        $this->assertNull($model->changeConnectionMode('sftp'));
+    }
 
-        $model = $this->createModel(['id' => 'dev']);
-        $return = $model->changeConnectionMode('git');
-        $this->assertEquals('The connection mode is already set to git.', $return);
+    public function testChangeConnectionModeToInvalid()
+    {
+        $model = $this->createModel(['id' => 'dev', 'on_server_development' => true,]);
+        $this->setExpectedException(
+            TerminusException::class,
+            'You must specify the mode as either sftp or git.'
+        );
+        $this->assertNull($model->changeConnectionMode('doggo'));
     }
 
     public function testClearCache()
@@ -199,15 +210,15 @@ class EnvironmentTest extends ModelTestCase
     {
         $this->setUpWorkflowOperationTest(
             'cloneDatabase',
-            ['stage',],
+            [$this->model,],
             'clone_database',
-            ['from_environment' => 'stage',]
+            ['from_environment' => 'dev',]
         );
         $this->setUpWorkflowOperationTest(
             'cloneDatabase',
-            ['prod',],
+            [$this->model,],
             'clone_database',
-            ['from_environment' => 'prod',]
+            ['from_environment' => 'dev',]
         );
     }
 
@@ -215,15 +226,15 @@ class EnvironmentTest extends ModelTestCase
     {
         $this->setUpWorkflowOperationTest(
             'cloneFiles',
-            ['stage',],
+            [$this->model,],
             'clone_files',
-            ['from_environment' => 'stage',]
+            ['from_environment' => 'dev',]
         );
         $this->setUpWorkflowOperationTest(
             'cloneFiles',
-            ['prod',],
+            [$this->model,],
             'clone_files',
-            ['from_environment' => 'prod',]
+            ['from_environment' => 'dev',]
         );
     }
 
@@ -266,19 +277,19 @@ class EnvironmentTest extends ModelTestCase
         $port = '2222';
         $username = $database = 'pantheon';
         $sftp_username = "{$this->model->id}.{$this->site->id}";
-        $sftp_hostname = "appserver.$sftp_username.drush.in";
-        $db_hostname = "dbserver.{$this->model->id}.{$this->model->site->id}.drush.in";
-        $cache_hostname = 'hostname';
-        $git_hostname = "codeserver.dev.{$this->site->id}.drush.in";
+        $sftp_domain = "appserver.$sftp_username.drush.in";
+        $db_domain = "dbserver.{$this->model->id}.{$this->model->getSite()->id}.drush.in";
+        $cache_domain = 'domain';
+        $git_domain = "codeserver.dev.{$this->site->id}.drush.in";
         $git_username = "codeserver.dev.{$this->site->id}";
 
         $sftp_expected = [
             'sftp_username' => $sftp_username,
-            'sftp_host' => $sftp_hostname,
+            'sftp_host' => $sftp_domain,
             'sftp_port' => '2222',
             'sftp_password' => 'Use your account password',
-            'sftp_url' => "sftp://$sftp_username@$sftp_hostname:$port",
-            'sftp_command' => "sftp -o Port=$port $sftp_username@$sftp_hostname",
+            'sftp_url' => "sftp://$sftp_username@$sftp_domain:$port",
+            'sftp_command' => "sftp -o Port=$port $sftp_username@$sftp_domain",
         ];
 
         $this->bindings->expects($this->at(0))
@@ -301,11 +312,11 @@ class EnvironmentTest extends ModelTestCase
         $db_expected = [
             'mysql_username' => $username,
             'mysql_password' => $password,
-            'mysql_host' => $db_hostname,
+            'mysql_host' => $db_domain,
             'mysql_port' => $port,
             'mysql_database' => $database,
-            'mysql_url' => "mysql://$username:$password@$db_hostname:$port/$database",
-            'mysql_command' => "mysql -u $username -p$password -h $db_hostname -P $port $database",
+            'mysql_url' => "mysql://$username:$password@$db_domain:$port/$database",
+            'mysql_command' => "mysql -u $username -p$password -h $db_domain -P $port $database",
         ];
 
         $this->bindings->expects($this->at(1))
@@ -323,7 +334,7 @@ class EnvironmentTest extends ModelTestCase
         $this->binding->expects($this->at(5))
             ->method('get')
             ->with($this->equalTo('host'))
-            ->willReturn($cache_hostname);
+            ->willReturn($cache_domain);
         $this->binding->expects($this->at(6))
             ->method('get')
             ->with($this->equalTo('port'))
@@ -331,18 +342,18 @@ class EnvironmentTest extends ModelTestCase
 
         $cache_expected = [
             'redis_password' => $password,
-            'redis_host' => $cache_hostname,
+            'redis_host' => $cache_domain,
             'redis_port' => $port,
-            'redis_url' => "redis://pantheon:$password@$cache_hostname:$port",
-            'redis_command' => "redis-cli -h $cache_hostname -p $port -a $password",
+            'redis_url' => "redis://pantheon:$password@$cache_domain:$port",
+            'redis_command' => "redis-cli -h $cache_domain -p $port -a $password",
         ];
 
         $git_expected = [
             'git_username' => $git_username,
-            'git_host' => $git_hostname,
+            'git_host' => $git_domain,
             'git_port' => $port,
-            'git_url' => "ssh://$git_username@$git_hostname:$port/~/repository.git",
-            'git_command' => "git clone ssh://$git_username@$git_hostname:$port/~/repository.git",
+            'git_url' => "ssh://$git_username@$git_domain:$port/~/repository.git",
+            'git_command' => "git clone ssh://$git_username@$git_domain:$port/~/repository.git",
         ];
 
         $out = $this->model->connectionInfo();
@@ -417,15 +428,15 @@ class EnvironmentTest extends ModelTestCase
         $password = 'password';
         $port = 'port';
         $username = $database = 'pantheon';
-        $hostname = "dbserver.{$this->model->id}.{$this->model->site->id}.drush.in";
+        $domain = "dbserver.{$this->model->id}.{$this->model->getSite()->id}.drush.in";
         $expected = [
             'username' => $username,
             'password' => $password,
-            'host' => $hostname,
+            'host' => $domain,
             'port' => $port,
             'database' => $database,
-            'url' => "mysql://$username:$password@$hostname:$port/$database",
-            'command' => "mysql -u $username -p$password -h $hostname -P $port $database",
+            'url' => "mysql://$username:$password@$domain:$port/$database",
+            'command' => "mysql -u $username -p$password -h $domain -P $port $database",
         ];
 
         $this->bindings->expects($this->once())
@@ -633,12 +644,6 @@ class EnvironmentTest extends ModelTestCase
         $this->assertEquals($expected, $actual);
     }
 
-    public function testGetLoadbalancers()
-    {
-        $out = $this->model->getLoadbalancers();
-        $this->assertEquals($this->loadbalancers, $out);
-    }
-
     public function testGetLock()
     {
         $out = $this->model->getLock();
@@ -695,8 +700,11 @@ class EnvironmentTest extends ModelTestCase
         $this->setUpWorkflowOperationTest(
             'importDatabase',
             ['https://example.com/myfile.sql',],
-            'import_database',
-            ['url' => 'https://example.com/myfile.sql',]
+            'do_import',
+            [
+                'url' => 'https://example.com/myfile.sql',
+                'database' => 1,
+            ]
         );
     }
 
@@ -715,55 +723,115 @@ class EnvironmentTest extends ModelTestCase
         $this->setUpWorkflowOperationTest(
             'importFiles',
             ['https://example.com/myfile.tar.gz',],
-            'import_files',
-            ['url' => 'https://example.com/myfile.tar.gz',]
+            'do_import',
+            [
+                'files' => 1,
+                'url' => 'https://example.com/myfile.tar.gz',
+            ]
         );
     }
 
+    /**
+     * Exercises the initializeBindings function
+     */
     public function testInitializeBindings()
     {
+        $live_copies_from = ['from_environment' => 'test',];
+        $test_copies_from = ['from_environment' => 'dev',];
+
+        // Test environment, no message supplied
         $this->setUpWorkflowOperationTest(
             'initializeBindings',
             [],
             'create_environment',
             [
                 'annotation' => 'Create the test environment',
-                'clone_database' => ['from_environment' => 'dev',],
-                'clone_files' => ['from_environment' => 'dev',],
+                'clone_database' => $test_copies_from,
+                'clone_files' => $test_copies_from,
             ],
             ['id' => 'test',]
         );
+
+        // Live environment, no message supplied
         $this->setUpWorkflowOperationTest(
             'initializeBindings',
             [],
             'create_environment',
             [
                 'annotation' => 'Create the live environment',
-                'clone_database' => ['from_environment' => 'test',],
-                'clone_files' => ['from_environment' => 'test',],
+                'clone_database' => $live_copies_from,
+                'clone_files' => $live_copies_from,
+            ],
+            ['id' => 'live',]
+        );
+
+        // Test environment, message supplied
+        $message_for_test = 'Fighting evil by moonlight';
+        $this->setUpWorkflowOperationTest(
+            'initializeBindings',
+            [['annotation' => $message_for_test,],],
+            'create_environment',
+            [
+                'annotation' => $message_for_test,
+                'clone_database' => $test_copies_from,
+                'clone_files' => $test_copies_from,
+            ],
+            ['id' => 'test',]
+        );
+
+        // Live environment, message supplied
+        $message_for_live = 'Winning love by daylight';
+        $this->setUpWorkflowOperationTest(
+            'initializeBindings',
+            [['annotation' => $message_for_live,],],
+            'create_environment',
+            [
+                'annotation' => $message_for_live,
+                'clone_database' => $live_copies_from,
+                'clone_files' => $live_copies_from,
             ],
             ['id' => 'live',]
         );
     }
 
-    public function testEnvIsInitialized()
+    public function testIsInitialized()
     {
-        $this->assertTrue($this->model->isInitialized());
+        $commits = $this->getMockBuilder(Commits::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $container = $this->getMockBuilder(Container::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $environments = $this->getMockBuilder(Environments::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $container->method('get')->willReturn($commits);
+        $environments->method('getSite')->with()->willReturn($this->site);
+
+        $model = new Environment((object)['id' => 'neither test nor live',], ['collection' => $environments,]);
+        $this->assertTrue($model->isInitialized());
+
+        $model = new Environment((object)['id' => 'test',], ['collection' => $environments,]);
+        $model->setContainer($container);
+        $commits->expects($this->once())
+            ->method('all')
+            ->willReturn([]);
+        $this->assertFalse($model->isInitialized());
+    }
+
+    public function testIsDevelopment()
+    {
+        $model = $this->createModel(['id' => 'test',]);
+        $this->assertFalse($model->isDevelopment());
+
+        $model = $this->createModel(['id' => 'live',]);
+        $this->assertFalse($model->isDevelopment());
 
         $model = $this->createModel(['id' => 'mymulti',]);
-        $this->assertTrue($model->isInitialized());
+        $this->assertTrue($model->isDevelopment());
 
-        $commits = [
-            ['some', 'commit',],
-        ];
-        $model = $this->createModel(['id' => 'test',]);
-        $model->commits = $this->getCommits($commits);
-        $this->assertTrue($model->isInitialized());
-
-        $commits = [];
-        $model = $this->createModel(['id' => 'test',]);
-        $model->commits = $this->getCommits($commits);
-        $this->assertFalse($model->isInitialized());
+        $model = $this->createModel(['id' => 'dev',]);
+        $this->assertTrue($model->isDevelopment());
     }
 
     public function testIsMultidev()
@@ -828,36 +896,41 @@ class EnvironmentTest extends ModelTestCase
         $model->mergeToDev();
     }
 
-    public function testSendCommandViaSsh()
+    /**
+     * Tests the Environment::serialize() function when the environment is in Git mode
+     */
+    public function testSerializeGitMode()
     {
-        $command = 'echo "Hello, World!"';
-        $expectedCommand = ProcessUtils::escapeArgument($command);
-
-        $expected = ['output' => 'Hello, World!', 'exit_code' => 0,];
-        $this->local_machine->expects($this->at(0))
-            ->method('execInteractive')
-            ->with('ssh -T dev.abc@appserver.dev.abc.drush.in -p 2222 -o "AddressFamily inet" ' . $expectedCommand)
-            ->willReturn($expected);
-
-        $actual = $this->model->sendCommandViaSsh($command);
-        $this->assertEquals($expected, $actual);
-
-        $this->configSet(['test_mode' => 1]);
-        $expected = [
-            'output' => "Terminus is in test mode. "
-                . "Environment::sendCommandViaSsh commands will not be sent over the wire. "
-                . "SSH Command: ssh -T dev.abc@appserver.dev.abc.drush.in -p 2222 -o \"AddressFamily inet\" $expectedCommand",
-            'exit_code' => 0
+        $info = [
+            'id' => 'dev',
+            'environment_created' => '1479413982',
+            'on_server_development' => false,
+            'php_version' => '70',
+            'dns_zone' => 'example.com',
         ];
-        $actual = $this->model->sendCommandViaSsh('echo "Hello, World!"');
+        $expected = [
+            'id' => 'dev',
+            'created' => '1479413982',
+            'domain' => 'dev-abc.example.com',
+            'onserverdev' => false,
+            'locked' => false,
+            'initialized' => true,
+            'connection_mode' => 'git',
+            'php_version' => '7.0',
+        ];
+        $this->lock->method('isLocked')->willReturn(false);
+        $this->configSet(['date_format' => 'Y-m-d',]);
+
+        $model = $this->createModel($info);
+        $actual = $model->serialize();
         $this->assertEquals($expected, $actual);
     }
 
-    public function testSerialize()
+    /**
+     * Tests the Environment::serialize() function when the environment is in SFTP mode
+     */
+    public function testSerializeSFTPMode()
     {
-        $this->config->method('get')->with('date_format')->willReturn('Y-m-d');
-        $this->configSet(['date_format' => 'Y-m-d']);
-
         $info = [
             'id' => 'dev',
             'environment_created' => '1479413982',
@@ -865,24 +938,19 @@ class EnvironmentTest extends ModelTestCase
             'php_version' => '70',
             'dns_zone' => 'example.com',
         ];
-        $this->lock->method('isLocked')->willReturn(false);
-        $model = $this->createModel($info);
-        $actual = $model->serialize();
         $expected = [
             'id' => 'dev',
-            'created' => '2016-11-17',
+            'created' => '1479413982',
             'domain' => 'dev-abc.example.com',
-            'onserverdev' => 'true',
-            'locked' => 'false',
-            'initialized' => 'true',
+            'onserverdev' => true,
+            'locked' => false,
+            'initialized' => true,
             'connection_mode' => 'sftp',
             'php_version' => '7.0',
         ];
-        $this->assertEquals($expected, $actual);
+        $this->lock->method('isLocked')->willReturn(false);
+        $this->configSet(['date_format' => 'Y-m-d',]);
 
-        $info['on_server_development'] = false;
-        $expected['onserverdev'] = 'false';
-        $expected['connection_mode'] = 'git';
         $model = $this->createModel($info);
         $actual = $model->serialize();
         $this->assertEquals($expected, $actual);
@@ -895,14 +963,14 @@ class EnvironmentTest extends ModelTestCase
             'intermediary' => 'INTERMEDIARY',
         ];
         $certificate = array_merge($expected_params, ['key' => null,]);
-        $this->model->site->id = 'site id';
+        $this->model->getSite()->id = 'site id';
         $this->model->id = 'env id';
         $response = ['data' => (object)['some' => 'data',],];
 
         $this->request->expects($this->once())
             ->method('request')
             ->with(
-                $this->equalTo("sites/{$this->model->site->id}/environments/{$this->model->id}/add-ssl-cert"),
+                $this->equalTo("sites/{$this->model->getSite()->id}/environments/{$this->model->id}/add-ssl-cert"),
                 $this->equalTo(['method' => 'POST', 'form_params' => $expected_params,])
             )
             ->willReturn($response);
@@ -964,7 +1032,7 @@ class EnvironmentTest extends ModelTestCase
         $domain->id = 'domain.ext';
         $response = [
             'status_code' => 200,
-            'headers'=> ['X-Pantheon-Styx-Hostname' => 'styx hostname',]
+            'headers'=> ['X-Pantheon-Styx-Hostname' => 'styx domain',]
         ];
         $expected = [
             'success' => true,
@@ -1028,9 +1096,6 @@ class EnvironmentTest extends ModelTestCase
         $this->domains = $this->getMockBuilder(Domains::class)
             ->disableOriginalConstructor()
             ->getMock();
-        $this->loadbalancers = $this->getMockBuilder(Loadbalancers::class)
-            ->disableOriginalConstructor()
-            ->getMock();
         $this->local_machine = $this->getMockBuilder(LocalMachineHelper::class)
             ->disableOriginalConstructor()
             ->getMock();
@@ -1051,7 +1116,6 @@ class EnvironmentTest extends ModelTestCase
         $this->container->add(Bindings::class, $this->bindings);
         $this->container->add(Commits::class, $this->commits);
         $this->container->add(Domains::class, $this->domains);
-        $this->container->add(Loadbalancers::class, $this->loadbalancers);
         $this->container->add(LocalMachineHelper::class, $this->local_machine);
         $this->container->add(Lock::class, $this->lock);
         $this->container->add(UpstreamStatus::class, $this->upstream_status);

@@ -46,7 +46,8 @@ class InstallCommand extends PluginBaseCommand
                     $message = "{$plugin} is already installed.";
                     $this->log()->notice($message);
                 } else {
-                    exec("composer create-project --stability={$options['stability']} --prefer-source --keep-vcs -n -d {$plugins_dir} {$project}:~{$terminus_major_version}", $messages);
+                    $latest_tag = $this->getLatestTag($terminus_major_version, $project);
+                    exec("composer create-project --stability={$options['stability']} --prefer-source --keep-vcs -n -d {$plugins_dir} {$project}:^{$latest_tag}", $messages);
                     foreach ($messages as $message) {
                         $this->log()->notice($message);
                     }

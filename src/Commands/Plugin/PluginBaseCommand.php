@@ -99,6 +99,42 @@ abstract class PluginBaseCommand extends TerminusCommand
     }
 
     /**
+     * Get the latest available plugin tag.
+     *
+     * @param string $project Plugin project
+     * @return string Latest plugin tag
+     */
+    protected function getLatestTag($project)
+    {
+        // Get the Terminus major version.
+        $terminus_major_version = $this->getTerminusMajorVersion();
+        exec("cd /tmp && git clone git@github.com/$project");
+        if (!empty($tag)) {
+            $version = array_pop($tag);
+            // Check for non-stable semantic version (ie. -beta1 or -rc2).
+            preg_match('/(.*)\-(.*)/', $version, $matches);
+            if (!empty($matches[1])) {
+                $stable_release = $matches[1];
+                exec("cd \"$plugin\" && git tag -l | grep ^[v$terminus_major_version|$terminus_major_version] | sort -Vr | xargs", $releases);
+                if (!empty($releases)) {
+                    foreach ($releases as $release) {
+                        // Update to stable release, if available.
+                        if ($release == $stable_release) {
+                            $version = $release;
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Get the latest version from HEAD.
+            exec("cd \"$plugin\" && git rev-parse --abbrev-ref HEAD", $branch);
+            $version = !empty($branch) ? array_pop($branch) : 'unknown';
+        }
+        return $version;
+    }
+
+    /**
      * Get the latest available plugin version.
      *
      * @param string $plugin Path to plugin
@@ -108,14 +144,14 @@ abstract class PluginBaseCommand extends TerminusCommand
     {
         // Get the Terminus major version.
         $terminus_major_version = $this->getTerminusMajorVersion();
-        exec("cd \"$plugin\" && git fetch --all && git tag -l | grep ^[v$terminus_major_version] | sort -Vr | head -1", $tag);
+        exec("cd \"$plugin\" && git fetch --all && git tag -l | grep ^[v$terminus_major_version|$terminus_major_version] | sort -Vr | head -1", $tag);
         if (!empty($tag)) {
             $version = array_pop($tag);
             // Check for non-stable semantic version (ie. -beta1 or -rc2).
-            preg_match('/(v*.*)\-(.*)/', $version, $matches);
+            preg_match('/(.*)\-(.*)/', $version, $matches);
             if (!empty($matches[1])) {
                 $stable_release = $matches[1];
-                exec("cd \"$plugin\" && git tag -l | grep ^[v$terminus_major_version] | sort -Vr | xargs", $releases);
+                exec("cd \"$plugin\" && git tag -l | grep ^[v$terminus_major_version|$terminus_major_version] | sort -Vr | xargs", $releases);
                 if (!empty($releases)) {
                     foreach ($releases as $release) {
                         // Update to stable release, if available.

@@ -9,7 +9,9 @@
   "require": {
     "php": ">=5.5.38",
     "composer/semver": "^1.4",
-    "consolidation/output-formatters": "^3.2",
+    "consolidation/comments": "^1.0.2",
+    "consolidation/filter-via-dot-access-data": "^1.0",
+    "consolidation/output-formatters": "^3.5",
     "consolidation/robo": "^1.4.4",
     "guzzlehttp/guzzle": "^6.2",
     "psy/psysh": "^0.8",
@@ -58,7 +60,6 @@
     "php-vcr/php-vcr": "^1.4",
     "phpunit/phpunit": "^4.8.36",
     "php-coveralls/php-coveralls": "^2.1",
-    "sebastian/phpcpd": "^2.0",
     "squizlabs/php_codesniffer": "^2.7"
   },
   "config": {
